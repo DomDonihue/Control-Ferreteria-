@@ -1,0 +1,12 @@
+# Config local de herramientas (no del proyecto)
+.claude/
+
+# Basura de Windows / OneDrive
+desktop.ini
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control Ferretería</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="pantalla-login" class="login-wrapper oculto">
+    <div class="login-brand">
+        <img
+        src="img/logo.png"
+        class="logo-municipal"
+        alt="Municipalidad de Doñihue">
+        <h1>
+            Control Ferretería
+        </h1>
+        <h2>
+            Dirección de Obras
+        </h2>
+        <p>
+            Unidad de Operaciones
+        </p>
+        <div class="linea"></div>
+        <span>
+            Sistema interno de gestión de materiales
+        </span>
+    </div>
+    <div class="login-card">
+        <h2>
+            Iniciar sesión
+        </h2>
+        <p class="subtitulo-login">
+            Accede al sistema de control de ferretería
+        </p>
+        <label for="login-email">
+            Correo institucional
+        </label>
+        <div class="input-group">
+            <span>
+            ✉
+            </span>
+            <input
+            id="login-email"
+            type="email"
+            placeholder="nombre@donihue.cl">
+        </div>
+        <label for="login-clave">
+            Contraseña
+        </label>
+        <div class="input-group">
+            <span>
+            🔒
+            </span>
+            <input
+            id="login-clave"
+            type="password"
+            placeholder="Ingrese su clave">
+        </div>
+        <button
+        class="btn-login"
+        id="btn-login">
+            → Acceder al sistema
+        </button>
+        <p
+        class="error oculto"
+        id="login-error">
+        </p>
+        <div class="login-footer">
+            🛡 Sistema municipal autorizado
+        </div>
+    </div>
+  </div>
+  <div id="app" class="oculto">
+    <header>
+      <div class="marca">
+        <img class="logo-header" src="img/logo.png" alt="Municipalidad de Doñihue">
+        <h1>Control Ferretería</h1>
+      </div>
+      <div class="usuario">
+        <span class="quien" id="quien-soy"></span>
+        <button class="secundario" id="btn-logout">Salir</button>
+      </div>
+    </header>
+    <main class="layout">
+      <aside class="menu-lateral">
+        <nav class="tabs" id="tabs"></nav>
+      </aside>
+      <div id="vista"></div>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
