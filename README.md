@@ -353,15 +353,59 @@ create policy "docs subir" on storage.objects for insert
   with check (bucket_id in ('memos','guias','facturas','especiales') and auth.role() = 'authenticated');
 ```
 
+## Formulario Único de Solicitud de Materiales (Anexo A)
+
+La pestaña **"Nueva solicitud"** es el Formulario Único del Manual: identificación,
+descripción/justificación técnica (5 campos), tabla de materiales (material,
+cantidad, unidad, valor referencial), respaldos adjuntos, y situaciones
+especiales (CDP negativo / producto fuera de catálogo). Si se marca **"fuera de
+catálogo"**, la solicitud entra como `tipo='especial'` y en su expediente
+aparecen los adjuntos de **Justificación Unidad Jurídica** y **Justificación DAF**
+(y, si hay CDP negativo, los 4 respaldos del punto 8). Ya no hay pestaña
+"Solicitud especial" aparte — es la misma.
+
+**Autocompletar desde el PDF:** el formulario tiene un campo para cargar el
+*Formulario Único editable* (`Documentacion/Formulario_Unico_Solicitud_Materiales_DOM_editable.pdf`).
+Con `pdf-lib` (cargado en `index.html`) se leen sus campos AcroForm y se llena la
+pantalla; el usuario revisa y corrige antes de enviar.
+
+Correr **una vez** en el SQL Editor:
+
+```sql
+-- FORMULARIO ÚNICO: campos nuevos en solicitud
+alter table solicitud add column if not exists correlativo               text;
+alter table solicitud add column if not exists contacto                  text;
+alter table solicitud add column if not exists supervisor                text;
+alter table solicitud add column if not exists descripcion_requerimiento text;
+alter table solicitud add column if not exists situacion_actual          text;
+alter table solicitud add column if not exists trabajo_ejecutar          text;
+alter table solicitud add column if not exists beneficio_publico         text;
+alter table solicitud add column if not exists monto_estimado            numeric;
+alter table solicitud add column if not exists resp_fotografico          boolean default false;
+alter table solicitud add column if not exists num_fotos                 integer;
+alter table solicitud add column if not exists resp_informe_tecnico      boolean default false;
+alter table solicitud add column if not exists resp_presupuesto          boolean default false;
+alter table solicitud add column if not exists resp_otro                 boolean default false;
+alter table solicitud add column if not exists resp_otro_texto           text;
+alter table solicitud add column if not exists cdp_negativo              boolean default false;
+-- adjuntos de la solicitud especial / CDP negativo
+alter table solicitud add column if not exists just_juridica_url            text;
+alter table solicitud add column if not exists just_daf_url                 text;
+alter table solicitud add column if not exists cdp_negativo_url             text;
+alter table solicitud add column if not exists just_reforzada_url           text;
+alter table solicitud add column if not exists pronunciamiento_juridica_url text;
+alter table solicitud add column if not exists resp_fotografico_url         text;
+
+-- FORMULARIO ÚNICO: campos nuevos en el detalle de materiales
+alter table solicitud_detalle add column if not exists unidad_medida_libre text;
+alter table solicitud_detalle add column if not exists valor_referencial   numeric;
+```
+
 ## Solicitud especial (material fuera de catálogo) + notas de crédito
 
-Pestaña **"Solicitud especial"** (admin y admin_ito): para material que no
-está en el catálogo. Sigue su propio trámite dentro del mismo expediente:
-justificación → **cotización** de la empresa → **decreto** + **orden de
-compra** (Mercado Público) → desde ahí sigue igual que una solicitud normal
-(guías de despacho, factura). También se agregó **editar/eliminar factura**
-(para errores de digitación) y **notas de crédito** (para correcciones reales
-del proveedor) — eliminar queda restringido a `admin`.
+También se agregó **editar/eliminar factura** (para errores de digitación) y
+**notas de crédito** (para correcciones reales del proveedor) — eliminar queda
+restringido a `admin`.
 
 Correr **una vez** en el SQL Editor:
 

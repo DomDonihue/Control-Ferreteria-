@@ -257,7 +257,6 @@ const ICONOS = {
 const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
-  { id: "especial", label: "Solicitud especial", grupo: "Gestión", icono: "especial", roles: ["admin", "admin_ito"], render: vistaSolicitudEspecial },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin"], render: vistaCatalogo },
@@ -437,43 +436,94 @@ function svgSolicitudesPorMes(solicitudes) {
   `;
 }
 
-// ---------------------------------------------------------------------
-// Nueva solicitud (solicitante y admin_ito)
-// ---------------------------------------------------------------------
+// =====================================================================
+// FORMULARIO ÚNICO DE SOLICITUD DE MATERIALES — DOM
+// (Anexo A del Manual de Procedimientos). Cubre solicitudes normales y
+// las "especiales" (producto fuera de catálogo) vía la casilla de la
+// sección 5. Se puede cargar el PDF editable y autocompletar.
+// =====================================================================
 let lineasSolicitud = [];
 
 async function vistaNuevaSolicitud() {
-  const { data: articulos } = await sb.from("articulo").select("id, descripcion, unidad_medida").order("descripcion");
+  const [{ data: articulos }, { data: unidades }] = await Promise.all([
+    sb.from("articulo").select("descripcion, unidad_medida").order("descripcion"),
+    sb.from("unidad").select("id, nombre").order("nombre"),
+  ]);
   lineasSolicitud = [];
 
   vista().innerHTML = `
     <div class="card">
-      <h3 style="margin-top:0">Nueva solicitud de materiales</h3>
+      <h3 style="margin-top:0">Formulario Único de Solicitud de Materiales — DOM</h3>
+      <p class="hint">Contrato de suministro de ferretería · marco disponible $60.000.000.
+        Complétalo en su totalidad; se adjunta como anexo al Memorándum de Solicitud.</p>
 
-      <label>Quién solicita</label>
-      <input id="ns-solicitante" type="text" value="${(perfilActual.nombre || "").replace(/"/g, "&quot;")}"
-             placeholder="Nombre y cargo de quien pide">
-
-      <label>Motivo de la solicitud</label>
-      <textarea id="ns-motivo" rows="2" placeholder="Ej: reposición de veredas por daño en la carpeta"></textarea>
-
-      <label>Dirección de la obra o problemática</label>
-      <textarea id="ns-ubicacion" rows="2" placeholder="Calle, número, sector o descripción del punto a intervenir"></textarea>
-
-      <label>Adjuntar solicitud, memo o documento que acredite lo solicitado</label>
-      <input id="ns-memo" type="file" accept=".pdf,.doc,.docx,image/*">
-      <p class="hint">PDF, Word o foto (máx. 10 MB). Ej: memo de la unidad, oficio, informe o registro fotográfico del daño.</p>
-
-      <h4>Productos del catálogo</h4>
-      <p class="hint">Solo material y cantidad. Los precios llegan después en la guía de despacho y la factura.</p>
-      <div id="ns-lineas"></div>
-      <div class="linea-detalle">
-        <div><label>Artículo</label>
-          <select id="ns-articulo">${(articulos || []).map(a => `<option value="${a.id}" data-um="${a.unidad_medida}">${a.descripcion}${a.unidad_medida ? ` (${a.unidad_medida})` : ""}</option>`).join("")}</select>
-        </div>
-        <div><label>Cantidad</label><input id="ns-cantidad" type="number" min="0" step="0.01"></div>
-        <div><button class="secundario" id="ns-agregar">+ Agregar</button></div>
+      <div style="border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin:12px 0;background:var(--surface-2)">
+        <label style="margin-top:0">¿Ya tienes el Formulario Único en PDF editable? Cárgalo y se autocompleta</label>
+        <input id="ns-pdf" type="file" accept="application/pdf">
+        <p class="hint" id="ns-pdf-msg">Lee los campos del PDF y llena el formulario de abajo. Igual puedes revisarlo y corregirlo antes de enviar.</p>
       </div>
+
+      <h4>1. Identificación del requerimiento</h4>
+      <div class="linea-detalle" style="grid-template-columns:1fr 1fr">
+        <div><label>N° de solicitud / correlativo</label><input id="ns-correlativo" placeholder="Ej: 2026-045"></div>
+        <div><label>Fecha de solicitud</label><input id="ns-fecha" type="date" value="${hoyISO()}"></div>
+      </div>
+      <label>Unidad solicitante</label>
+      <select id="ns-unidad">
+        <option value="">— selecciona —</option>
+        ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${u.nombre}</option>`).join("")}
+      </select>
+      <label>Responsable del requerimiento</label>
+      <input id="ns-solicitante" value="${esc(perfilActual.nombre)}" placeholder="Nombre y cargo">
+      <label>Teléfono / correo de contacto</label>
+      <input id="ns-contacto">
+      <label>Responsable de supervisar la ejecución</label>
+      <input id="ns-supervisor">
+      <label>Ubicación de uso de los materiales</label>
+      <textarea id="ns-ubicacion" rows="2" placeholder="Calle, número, sector"></textarea>
+
+      <h4>2. Descripción y justificación técnica</h4>
+      <label>Descripción del requerimiento (qué se solicita)</label>
+      <textarea id="ns-desc" rows="2"></textarea>
+      <label>Fundamento / motivo de la solicitud</label>
+      <textarea id="ns-motivo" rows="2"></textarea>
+      <label>Situación actual (diagnóstico)</label>
+      <textarea id="ns-situacion" rows="2"></textarea>
+      <label>Trabajo a ejecutar</label>
+      <textarea id="ns-trabajo" rows="2"></textarea>
+      <label>Beneficio público esperado</label>
+      <textarea id="ns-beneficio" rows="2"></textarea>
+
+      <h4>3. Detalle de materiales solicitados</h4>
+      <div id="ns-lineas"></div>
+      <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr 1fr auto">
+        <div><label>Material</label><input id="ns-mat" list="ns-catalogo" placeholder="Nombre del material"></div>
+        <div><label>Cantidad</label><input id="ns-cant" type="number" min="0" step="0.01"></div>
+        <div><label>Unidad</label><input id="ns-um" placeholder="un, m, kg, saco…"></div>
+        <div><label>Valor ref. ($)</label><input id="ns-valor" type="number" min="0" step="1"></div>
+        <div><button class="secundario" id="ns-agregar" style="margin-top:0">+ Agregar</button></div>
+      </div>
+      <datalist id="ns-catalogo">${(articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("")}</datalist>
+      <p class="totales">Monto total estimado: <b id="ns-total">$0</b></p>
+
+      <h4>4. Respaldos adjuntos</h4>
+      <label class="chk"><input type="checkbox" id="ns-resp-foto"> Respaldo fotográfico &nbsp;·&nbsp; N° de fotografías:
+        <input id="ns-num-fotos" type="number" min="0" class="chk-inline"></label>
+      <label class="chk"><input type="checkbox" id="ns-resp-informe"> Informe técnico complementario / cubicación de materiales</label>
+      <label class="chk"><input type="checkbox" id="ns-resp-presupuesto"> Presupuesto estimativo / planificación del trabajo</label>
+      <label class="chk"><input type="checkbox" id="ns-resp-otro"> Otro:
+        <input id="ns-resp-otro-texto" placeholder="especificar" class="chk-inline" style="width:220px"></label>
+
+      <label>Adjuntar el Formulario Único firmado / memo (PDF, Word o foto)</label>
+      <input id="ns-memo" type="file" accept=".pdf,.doc,.docx,image/*">
+      <p class="hint">Es el documento que se anexa al Memorándum de Solicitud (máx. 10 MB).</p>
+
+      <h4>5. Situaciones especiales</h4>
+      <label class="chk"><input type="checkbox" id="ns-cdp-negativo"> Solicitud con CDP negativo (Manual, punto 8)</label>
+      <label class="chk"><input type="checkbox" id="ns-fuera-catalogo"> El producto NO figura en el catálogo cerrado del contrato (Manual, punto 10)</label>
+      <p class="hint oculto" id="ns-aviso-especial">Al marcar "fuera de catálogo" la solicitud entra como
+        <strong>especial</strong>: en su expediente deberás adjuntar la justificación de la Unidad Jurídica
+        y de la DAF, y la compra se tramita por Mercado Público.</p>
 
       <button class="primario" id="ns-guardar">Ingresar solicitud</button>
       <p class="error oculto" id="ns-error"></p>
@@ -481,103 +531,193 @@ async function vistaNuevaSolicitud() {
   `;
 
   document.getElementById("ns-agregar").addEventListener("click", () => {
-    const sel = document.getElementById("ns-articulo");
-    const cantidad = parseFloat(document.getElementById("ns-cantidad").value);
-    if (!sel.value || !cantidad) return;
+    const mat = document.getElementById("ns-mat").value.trim();
+    const cant = parseFloat(document.getElementById("ns-cant").value);
+    if (!mat || !cant) return;
     lineasSolicitud.push({
-      articulo_id: sel.value,
-      descripcion: sel.options[sel.selectedIndex].text,
-      cantidad_solicitada: cantidad,
+      descripcion: mat,
+      cantidad_solicitada: cant,
+      unidad_medida: document.getElementById("ns-um").value.trim(),
+      valor_referencial: parseFloat(document.getElementById("ns-valor").value) || 0,
     });
-    document.getElementById("ns-cantidad").value = "";
+    ["ns-mat", "ns-cant", "ns-um", "ns-valor"].forEach(id => document.getElementById(id).value = "");
     pintarLineas();
   });
 
+  document.getElementById("ns-fuera-catalogo").addEventListener("change", (e) => {
+    document.getElementById("ns-aviso-especial").classList.toggle("oculto", !e.target.checked);
+  });
+  document.getElementById("ns-pdf").addEventListener("change", (e) => {
+    if (e.target.files[0]) leerFormularioPDF(e.target.files[0]);
+  });
   document.getElementById("ns-guardar").addEventListener("click", guardarSolicitud);
   pintarLineas();
 }
 
 function pintarLineas() {
   const cont = document.getElementById("ns-lineas");
+  const total = lineasSolicitud.reduce((a, l) => a + Number(l.valor_referencial || 0), 0);
+  const tEl = document.getElementById("ns-total");
+  if (tEl) tEl.textContent = money(total);
   if (!lineasSolicitud.length) {
-    cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas artículos.</p>";
+    cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas materiales.</p>";
     return;
   }
-  cont.innerHTML = `<table><tr><th>Artículo</th><th class="num">Cantidad</th><th></th></tr>
+  cont.innerHTML = `<table>
+    <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th class="num">Valor ref.</th><th></th></tr>
     ${lineasSolicitud.map((l, i) => `<tr>
-        <td>${l.descripcion}</td><td class="num">${l.cantidad_solicitada}</td>
+        <td>${l.descripcion}</td>
+        <td class="num">${l.cantidad_solicitada}</td>
+        <td>${l.unidad_medida || "—"}</td>
+        <td class="num">${money(l.valor_referencial)}</td>
         <td><button class="secundario" onclick="quitarLinea(${i})">Quitar</button></td>
       </tr>`).join("")}
   </table>`;
 }
 function quitarLinea(i) { lineasSolicitud.splice(i, 1); pintarLineas(); }
 
+// Lee el PDF editable (campos AcroForm) y autocompleta el formulario.
+async function leerFormularioPDF(file) {
+  const msg = document.getElementById("ns-pdf-msg");
+  if (!window.PDFLib) { msg.textContent = "No se pudo cargar el lector de PDF (revisa la conexión)."; return; }
+  msg.textContent = "Leyendo el PDF…";
+  try {
+    const doc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
+    const form = doc.getForm();
+    const T = (n) => { try { return (form.getTextField(n).getText() || "").trim(); } catch { return ""; } };
+    const C = (n) => { try { return form.getCheckBox(n).isChecked(); } catch { return false; } };
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    const num = (v) => parseFloat(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) || 0;
+    const fecha = (v) => { const m = String(v).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/); return m ? `${m[3].padStart(4, "20")}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
+
+    set("ns-correlativo", T("num_solicitud"));
+    set("ns-fecha", fecha(T("fecha_solicitud")));
+    set("ns-solicitante", T("responsable_requerimiento"));
+    set("ns-contacto", T("contacto"));
+    set("ns-supervisor", T("responsable_supervisor"));
+    set("ns-ubicacion", T("ubicacion_uso"));
+    set("ns-desc", T("desc_requerimiento"));
+    set("ns-motivo", T("fundamento"));
+    set("ns-situacion", T("situacion_actual"));
+    set("ns-trabajo", T("trabajo_ejecutar"));
+    set("ns-beneficio", T("beneficio_publico"));
+
+    // unidad solicitante: intenta calzar por nombre
+    const unTxt = T("unidad_solicitante").toLowerCase();
+    if (unTxt) {
+      const opt = [...document.getElementById("ns-unidad").options].find(o => o.textContent.toLowerCase().includes(unTxt) || unTxt.includes(o.textContent.toLowerCase()));
+      if (opt) document.getElementById("ns-unidad").value = opt.value;
+    }
+
+    lineasSolicitud = [];
+    for (let r = 0; r < 5; r++) {
+      const mat = T(`mat_r${r}_c0`);
+      if (!mat) continue;
+      lineasSolicitud.push({
+        descripcion: mat,
+        cantidad_solicitada: num(T(`mat_r${r}_c1`)),
+        unidad_medida: T(`mat_r${r}_c2`),
+        valor_referencial: num(T(`mat_r${r}_c3`)),
+      });
+    }
+    pintarLineas();
+
+    document.getElementById("ns-resp-foto").checked = C("chk_fotografico");
+    set("ns-num-fotos", T("num_fotos"));
+    document.getElementById("ns-resp-informe").checked = C("chk_informe_tecnico");
+    document.getElementById("ns-resp-presupuesto").checked = C("chk_presupuesto");
+    document.getElementById("ns-resp-otro").checked = C("chk_otro");
+    set("ns-resp-otro-texto", T("otro_texto"));
+    document.getElementById("ns-cdp-negativo").checked = C("chk_cdp_negativo");
+    const fuera = C("chk_no_catalogo");
+    document.getElementById("ns-fuera-catalogo").checked = fuera;
+    document.getElementById("ns-aviso-especial").classList.toggle("oculto", !fuera);
+
+    msg.textContent = "Formulario autocompletado desde el PDF. Revísalo y corrige lo que falte.";
+  } catch (e) {
+    msg.textContent = "No se pudo leer el PDF: " + e.message + ". Llena el formulario a mano.";
+  }
+}
+
 async function guardarSolicitud() {
   const errorEl = document.getElementById("ns-error");
   const mostrarError = (msg) => { errorEl.textContent = msg; errorEl.classList.remove("oculto"); };
+  errorEl.classList.add("oculto");
 
-  const solicitante = document.getElementById("ns-solicitante").value.trim();
-  const motivo = document.getElementById("ns-motivo").value.trim();
-  const ubicacion = document.getElementById("ns-ubicacion").value.trim();
+  const val = (id) => document.getElementById(id).value.trim();
+  const unidad_id = document.getElementById("ns-unidad").value || perfilActual.unidad_id || null;
+  const solicitante = val("ns-solicitante");
+  const motivo = val("ns-motivo");
+  const ubicacion = val("ns-ubicacion");
+  const fuera_catalogo = document.getElementById("ns-fuera-catalogo").checked;
 
-  if (!solicitante) { mostrarError("Indica quién solicita."); return; }
-  if (!motivo) { mostrarError("Indica el motivo de la solicitud."); return; }
-  if (!ubicacion) { mostrarError("Indica la dirección de la obra o la problemática."); return; }
-  if (!lineasSolicitud.length) { mostrarError("Agrega al menos un producto del catálogo."); return; }
+  if (!unidad_id) { mostrarError("Selecciona la unidad solicitante."); return; }
+  if (!solicitante) { mostrarError("Indica el responsable del requerimiento."); return; }
+  if (!motivo) { mostrarError("Indica el fundamento / motivo de la solicitud."); return; }
+  if (!ubicacion) { mostrarError("Indica la ubicación de uso de los materiales."); return; }
+  if (!lineasSolicitud.length) { mostrarError("Agrega al menos un material."); return; }
 
-  const unidad_id = perfilActual.unidad_id;
-  if (!unidad_id) {
-    errorEl.textContent = "Tu perfil no tiene una unidad asignada — pide al administrador que la agregue.";
-    errorEl.classList.remove("oculto");
-    return;
-  }
-  // Adjunto opcional (memo / solicitud formal) → Storage bucket "memos".
+  // Adjunto (Formulario Único firmado / memo) → bucket "memos"
   let memo_url = null;
-  const fileInput = document.getElementById("ns-memo");
-  const file = fileInput && fileInput.files[0];
+  const file = document.getElementById("ns-memo").files[0];
   if (file) {
-    if (file.size > 10 * 1024 * 1024) {
-      errorEl.textContent = "El adjunto supera los 10 MB.";
-      errorEl.classList.remove("oculto");
-      return;
-    }
-    const ext = (file.name.split(".").pop() || "dat").toLowerCase();
-    const ruta = `${perfilActual.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const { error: upErr } = await sb.storage.from("memos").upload(ruta, file, { upsert: false });
-    if (upErr) {
-      errorEl.textContent = "No se pudo subir el adjunto: " + upErr.message +
-        " (revisa que exista el bucket 'memos' en Supabase Storage).";
-      errorEl.classList.remove("oculto");
-      return;
-    }
-    memo_url = sb.storage.from("memos").getPublicUrl(ruta).data.publicUrl;
+    const { url, error: upErr } = await subirArchivo("memos", file);
+    if (upErr) { mostrarError(upErr); return; }
+    memo_url = url;
   }
 
-  const nuevaSolicitud = {
-    unidad_id,
-    solicitante,
-    motivo,
-    ubicacion, // requiere columna solicitud.ubicacion
+  const monto_estimado = lineasSolicitud.reduce((a, l) => a + Number(l.valor_referencial || 0), 0);
+  const descripcion_requerimiento = val("ns-desc");
+  const situacion_actual = val("ns-situacion");
+
+  const payload = {
+    unidad_id, solicitante, motivo, ubicacion,
+    correlativo: val("ns-correlativo") || null,
+    fecha_solicitud: document.getElementById("ns-fecha").value || null,
+    contacto: val("ns-contacto") || null,
+    supervisor: val("ns-supervisor") || null,
+    descripcion_requerimiento: descripcion_requerimiento || null,
+    situacion_actual: situacion_actual || null,
+    trabajo_ejecutar: val("ns-trabajo") || null,
+    beneficio_publico: val("ns-beneficio") || null,
+    monto_estimado,
+    resp_fotografico: document.getElementById("ns-resp-foto").checked,
+    num_fotos: parseInt(document.getElementById("ns-num-fotos").value) || null,
+    resp_informe_tecnico: document.getElementById("ns-resp-informe").checked,
+    resp_presupuesto: document.getElementById("ns-resp-presupuesto").checked,
+    resp_otro: document.getElementById("ns-resp-otro").checked,
+    resp_otro_texto: val("ns-resp-otro-texto") || null,
+    cdp_negativo: document.getElementById("ns-cdp-negativo").checked,
+    tipo: fuera_catalogo ? "especial" : "normal",
   };
-  if (memo_url) nuevaSolicitud.memo_url = memo_url; // requiere columna solicitud.memo_url
+  if (memo_url) payload.memo_url = memo_url;
+  if (fuera_catalogo) {
+    payload.justificacion_especial = [descripcion_requerimiento, motivo, situacion_actual].filter(Boolean).join(" — ");
+  }
 
-  const { data: solicitud, error } = await sb.from("solicitud").insert(nuevaSolicitud).select().single();
-
-  if (error) { errorEl.textContent = error.message; errorEl.classList.remove("oculto"); return; }
+  const { data: solicitud, error } = await sb.from("solicitud").insert(payload).select().single();
+  if (error) { mostrarError(error.message); return; }
 
   const detalle = lineasSolicitud.map(l => ({
     solicitud_id: solicitud.id,
-    articulo_id: l.articulo_id,
+    articulo_id: null,
+    descripcion_libre: l.descripcion,
+    unidad_medida_libre: l.unidad_medida || null,
     cantidad_solicitada: l.cantidad_solicitada,
+    valor_referencial: l.valor_referencial || null,
   }));
   const { error: errorDetalle } = await sb.from("solicitud_detalle").insert(detalle);
-  if (errorDetalle) { errorEl.textContent = errorDetalle.message; errorEl.classList.remove("oculto"); return; }
+  if (errorDetalle) { mostrarError(errorDetalle.message); return; }
 
   vista().innerHTML = `<div class="card">
-    <h3 style="margin-top:0">Solicitud ingresada</h3>
+    <h3 style="margin-top:0">Solicitud ingresada${fuera_catalogo ? " (especial)" : ""}</h3>
     <p>Queda <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
-    Una vez aprobada, podrás descargar la hoja de solicitud desde <strong>Expedientes</strong>
-    para enviarla a la empresa.</p>
+    ${fuera_catalogo
+      ? `Al ser <strong>fuera de catálogo</strong>, en su expediente (pestaña <strong>Expedientes</strong>)
+         deberás cargar la justificación de la Unidad Jurídica y de la DAF, la cotización y la
+         documentación de Mercado Público.`
+      : `Una vez aprobada, descarga la hoja desde <strong>Expedientes</strong> para enviarla a la empresa.`}
+    </p>
   </div>`;
 }
 
@@ -855,23 +995,49 @@ async function vistaExpediente(id) {
         </div>
       </div>
       <div class="exp-datos">
-        <div><div class="d-k">Solicita</div>${s.solicitante || "—"}</div>
-        <div><div class="d-k">Obra</div>${s.obra?.nombre || "—"}</div>
-        <div><div class="d-k">Motivo</div>${s.motivo || "—"}</div>
-        <div><div class="d-k">Dirección / problemática</div>${s.ubicacion || "—"}</div>
-        <div><div class="d-k">Solicitud / memo</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
-        ${especial ? `<div><div class="d-k">Justificación</div>${s.justificacion_especial || "—"}</div>` : ""}
+        <div><div class="d-k">Correlativo</div>${s.correlativo || (s.n_solicitud ? "N° " + s.n_solicitud : "—")}</div>
+        <div><div class="d-k">Fecha</div>${s.fecha_solicitud || "—"}</div>
+        <div><div class="d-k">Unidad solicitante</div>${s.unidad?.nombre || "—"}</div>
+        <div><div class="d-k">Responsable</div>${s.solicitante || "—"}</div>
+        <div><div class="d-k">Contacto</div>${s.contacto || "—"}</div>
+        <div><div class="d-k">Supervisa ejecución</div>${s.supervisor || "—"}</div>
+        <div><div class="d-k">Ubicación de uso</div>${s.ubicacion || "—"}</div>
+        <div><div class="d-k">Formulario / memo</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+      </div>
+
+      <div class="exp-seccion" style="margin-top:1.2rem"><h4>Descripción y justificación técnica</h4></div>
+      <div class="exp-datos">
+        <div><div class="d-k">Qué se solicita</div>${s.descripcion_requerimiento || "—"}</div>
+        <div><div class="d-k">Fundamento / motivo</div>${s.motivo || "—"}</div>
+        <div><div class="d-k">Situación actual</div>${s.situacion_actual || "—"}</div>
+        <div><div class="d-k">Trabajo a ejecutar</div>${s.trabajo_ejecutar || "—"}</div>
+        <div><div class="d-k">Beneficio público</div>${s.beneficio_publico || "—"}</div>
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Materiales solicitados</h4></div>
       <table>
-        <tr><th>Artículo</th><th class="num">Cantidad</th><th>Unidad</th></tr>
+        <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th class="num">Valor ref.</th></tr>
         ${(detalle || []).map(d => `<tr>
           <td>${d.articulo?.descripcion || d.descripcion_libre || ""}</td>
           <td class="num">${d.cantidad_solicitada}</td>
-          <td>${d.articulo?.unidad_medida || ""}</td>
+          <td>${d.unidad_medida_libre || d.articulo?.unidad_medida || "—"}</td>
+          <td class="num">${d.valor_referencial ? money(d.valor_referencial) : "—"}</td>
         </tr>`).join("")}
+        <tr><td colspan="3" style="text-align:right;font-weight:700">Monto total estimado</td>
+            <td class="num" style="font-weight:700">${money(s.monto_estimado)}</td></tr>
       </table>
+
+      <div class="exp-seccion" style="margin-top:1.2rem"><h4>Respaldos y situaciones especiales</h4></div>
+      <p class="hint" style="margin-top:0">
+        ${[
+          s.resp_fotografico ? `Respaldo fotográfico${s.num_fotos ? ` (${s.num_fotos} fotos)` : ""}` : null,
+          s.resp_informe_tecnico ? "Informe técnico / cubicación" : null,
+          s.resp_presupuesto ? "Presupuesto estimativo" : null,
+          s.resp_otro ? `Otro: ${s.resp_otro_texto || ""}` : null,
+          s.cdp_negativo ? "⚠ CDP negativo" : null,
+          especial ? "⚠ Producto fuera de catálogo" : null,
+        ].filter(Boolean).join(" · ") || "Sin respaldos marcados."}
+      </p>
 
       <div class="acciones">
         <button class="primario" onclick="descargarHojaPDF()" ${aprobada ? "" : "disabled"}>
@@ -1056,7 +1222,76 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
         </div>
       ` : ""}
     </div>
+
+    <div class="card">
+      <div class="exp-seccion"><h4>Justificaciones obligatorias (fuera de catálogo · Manual, punto 10)</h4></div>
+      <div class="exp-datos">
+        <div><div class="d-k">Justificación Unidad Jurídica</div>${s.just_juridica_url ? `<a href="${s.just_juridica_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Justificación DAF</div>${s.just_daf_url ? `<a href="${s.just_daf_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+      </div>
+      ${s.cdp_negativo ? `
+        <p class="hint" style="color:var(--warn);margin-top:.8rem">⚠ CDP negativo (Manual, punto 8): además se adjunta CDP negativo,
+          justificación reforzada, respaldo fotográfico y pronunciamiento de la Unidad Jurídica.</p>
+        <div class="exp-datos">
+          <div><div class="d-k">CDP negativo</div>${s.cdp_negativo_url ? `<a href="${s.cdp_negativo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+          <div><div class="d-k">Justificación reforzada</div>${s.just_reforzada_url ? `<a href="${s.just_reforzada_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+          <div><div class="d-k">Pronunciamiento Jurídica</div>${s.pronunciamiento_juridica_url ? `<a href="${s.pronunciamiento_juridica_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+          <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+        </div>` : ""}
+
+      ${opero ? `
+        <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
+          <h4 style="margin-top:0">Adjuntar / actualizar justificaciones</h4>
+          <label>Justificación de la Unidad Jurídica (PDF)</label>
+          <input id="jj-juridica" type="file" accept=".pdf,image/*">
+          <label>Justificación de la DAF (PDF)</label>
+          <input id="jj-daf" type="file" accept=".pdf,image/*">
+          ${s.cdp_negativo ? `
+            <label>CDP negativo (PDF)</label><input id="jj-cdp" type="file" accept=".pdf,image/*">
+            <label>Justificación reforzada (PDF)</label><input id="jj-reforzada" type="file" accept=".pdf,image/*">
+            <label>Pronunciamiento Unidad Jurídica (PDF)</label><input id="jj-pronunciamiento" type="file" accept=".pdf,image/*">
+            <label>Respaldo fotográfico (PDF o imagen)</label><input id="jj-foto" type="file" accept=".pdf,image/*">
+          ` : ""}
+          <button class="primario" onclick="guardarJustificacionesEspecial('${s.id}', ${s.cdp_negativo ? "true" : "false"})">Guardar justificaciones</button>
+          <p class="error oculto" id="jj-error"></p>
+          <p class="ok-msg oculto" id="jj-ok"></p>
+        </div>
+      ` : ""}
+    </div>
   `;
+}
+
+async function guardarJustificacionesEspecial(solicitudId, conCdp) {
+  const errorEl = document.getElementById("jj-error");
+  const okEl = document.getElementById("jj-ok");
+  errorEl.classList.add("oculto"); okEl.classList.add("oculto");
+
+  const subir = async (id) => {
+    const f = document.getElementById(id);
+    if (!f || !f.files[0]) return null;
+    const { url, error } = await subirArchivo("especiales", f.files[0]);
+    if (error) throw new Error(error);
+    return url;
+  };
+
+  try {
+    const payload = {};
+    const jur = await subir("jj-juridica"); if (jur) payload.just_juridica_url = jur;
+    const daf = await subir("jj-daf");      if (daf) payload.just_daf_url = daf;
+    if (conCdp) {
+      const cdp = await subir("jj-cdp");             if (cdp) payload.cdp_negativo_url = cdp;
+      const ref = await subir("jj-reforzada");       if (ref) payload.just_reforzada_url = ref;
+      const pro = await subir("jj-pronunciamiento"); if (pro) payload.pronunciamiento_juridica_url = pro;
+      const fot = await subir("jj-foto");            if (fot) payload.resp_fotografico_url = fot;
+    }
+    if (!Object.keys(payload).length) { errorEl.textContent = "No seleccionaste ningún archivo."; errorEl.classList.remove("oculto"); return; }
+    const { error } = await sb.from("solicitud").update(payload).eq("id", solicitudId);
+    if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
+    okEl.textContent = "Justificaciones guardadas."; okEl.classList.remove("oculto");
+    vistaExpediente(solicitudId);
+  } catch (e) {
+    errorEl.textContent = e.message; errorEl.classList.remove("oculto");
+  }
 }
 
 async function guardarCotizacion(solicitudId) {
@@ -1414,34 +1649,50 @@ function descargarHojaPDF() {
   doc.setFont("helvetica", "normal"); doc.setFontSize(10);
 
   y += 9;
-  const fila = (k, v) => { doc.setFont("helvetica", "bold"); doc.text(k, M, y); doc.setFont("helvetica", "normal"); doc.text(String(v || "—"), M + 42, y, { maxWidth: 130 }); y += 7; };
+  const fila = (k, v) => { doc.setFont("helvetica", "bold"); doc.text(k, M, y); doc.setFont("helvetica", "normal"); const lns = doc.splitTextToSize(String(v || "—"), 130); doc.text(lns, M + 46, y); y += 6 + (lns.length - 1) * 4.5; };
+  fila("Correlativo:", s.correlativo || (s.n_solicitud ? "N° " + s.n_solicitud : ""));
   fila("Fecha:", s.fecha_solicitud || hoyISO());
-  fila("Unidad:", exp.s.unidad?.nombre || "");
-  fila("Solicita:", s.solicitante || "");
-  fila("Motivo:", s.motivo || "");
-  fila("Dirección / obra:", s.ubicacion || "");
-  if (especial) fila("Justificación:", s.justificacion_especial || "");
+  fila("Unidad solicitante:", exp.s.unidad?.nombre || "");
+  fila("Responsable:", s.solicitante || "");
+  fila("Contacto:", s.contacto || "");
+  fila("Supervisa ejecución:", s.supervisor || "");
+  fila("Ubicación de uso:", s.ubicacion || "");
+  y += 2;
+  fila("Descripción:", s.descripcion_requerimiento || "");
+  fila("Fundamento / motivo:", s.motivo || "");
+  fila("Situación actual:", s.situacion_actual || "");
+  fila("Trabajo a ejecutar:", s.trabajo_ejecutar || "");
+  fila("Beneficio público:", s.beneficio_publico || "");
 
   y += 4;
+  if (y > 250) { doc.addPage(); y = M; }
   doc.setFont("helvetica", "bold");
   doc.text("MATERIALES SOLICITADOS", M, y); y += 3;
   doc.setDrawColor(180); doc.line(M, y, 210 - M, y); y += 6;
 
   doc.text("N°", M, y);
-  doc.text("Artículo", M + 12, y);
-  doc.text("Cantidad", 150, y);
-  doc.text("Unidad", 175, y);
+  doc.text("Material", M + 12, y);
+  doc.text("Cant.", 120, y);
+  doc.text("Unidad", 140, y);
+  doc.text("Valor ref. $", 168, y);
   doc.setFont("helvetica", "normal");
   y += 2; doc.line(M, y, 210 - M, y); y += 6;
 
   (detalle || []).forEach((d, i) => {
     if (y > 265) { doc.addPage(); y = M; }
     doc.text(String(i + 1), M, y);
-    doc.text(String(d.articulo?.descripcion || d.descripcion_libre || ""), M + 12, y, { maxWidth: 130 });
-    doc.text(String(d.cantidad_solicitada ?? ""), 150, y);
-    doc.text(String(d.articulo?.unidad_medida || ""), 175, y);
+    doc.text(doc.splitTextToSize(String(d.articulo?.descripcion || d.descripcion_libre || ""), 100), M + 12, y);
+    doc.text(String(d.cantidad_solicitada ?? ""), 120, y);
+    doc.text(String(d.unidad_medida_libre || d.articulo?.unidad_medida || ""), 140, y);
+    doc.text(d.valor_referencial ? Number(d.valor_referencial).toLocaleString("es-CL") : "", 168, y);
     y += 7;
   });
+  doc.line(M, y - 3, 210 - M, y - 3);
+  doc.setFont("helvetica", "bold");
+  doc.text("MONTO TOTAL ESTIMADO", M + 12, y);
+  doc.text("$ " + Number(s.monto_estimado || 0).toLocaleString("es-CL"), 168, y);
+  doc.setFont("helvetica", "normal");
+  y += 8;
 
   y += 10;
   doc.line(M, y, 90, y); y += 5;

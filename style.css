@@ -245,6 +245,11 @@ button.secundario:hover{ border-color:var(--navy); color:var(--navy); background
 .error{ color:var(--critical); font-size:.85rem; margin-top:.6rem; }
 .ok-msg{ color:var(--ok); font-size:.85rem; margin-top:.6rem; }
 
+/* Casillas de verificación en fila (Formulario Único) */
+label.chk{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-weight:500; font-size:.88rem; margin:.5rem 0 0; }
+label.chk input[type="checkbox"]{ width:16px; height:16px; flex-shrink:0; accent-color:var(--gold-deep); }
+.chk-inline{ width:90px; height:32px; display:inline-block; padding:.3rem .5rem; }
+
 /* ---------- EXPEDIENTE ---------- */
 .exp-volver{ background:none; border:none; color:var(--ink-soft); cursor:pointer; font-size:.85rem; padding:0; margin-bottom:.6rem; }
 .exp-volver:hover{ color:var(--ink); }
