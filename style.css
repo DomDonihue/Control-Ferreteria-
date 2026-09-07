@@ -346,6 +346,16 @@ button.secundario:hover{ border-color:var(--navy); color:var(--navy); background
   .login-wrapper{ flex-direction:column; gap:30px; }
   .login-card{ width:100%; max-width:420px; }
 }
+/* ---------- AVISO DE CIERRE POR INACTIVIDAD ---------- */
+.aviso-inactividad{
+  position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:999;
+  max-width:640px; width:calc(100% - 32px);
+  background:var(--warn-tint); color:var(--warn);
+  border:1px solid var(--warn); border-radius:12px;
+  padding:.7rem 1rem; font-size:.85rem; font-weight:600; text-align:center;
+  box-shadow:0 12px 30px rgba(15,27,51,.18);
+}
+
 @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
 
 /* ---------- IMPRESIÓN: hoja de solicitud ---------- */

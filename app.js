@@ -27,6 +27,48 @@ async function iniciar() {
 function mostrarLogin() {
   document.getElementById("pantalla-login").classList.remove("oculto");
   document.getElementById("app").classList.add("oculto");
+  if (sessionStorage.getItem("cierre_inactividad")) {
+    sessionStorage.removeItem("cierre_inactividad");
+    const e = document.getElementById("login-error");
+    e.textContent = "Se cerró la sesión por inactividad. Vuelve a ingresar.";
+    e.classList.remove("oculto");
+  }
+}
+
+// ---------------------------------------------------------------------
+// Cierre automático por inactividad (seguridad: equipo desatendido)
+// ---------------------------------------------------------------------
+const MINUTOS_INACTIVIDAD = 20;
+let _ultimaActividad = Date.now();
+let _timerInactividad = null;
+let _avisoInactividad = null;
+
+function _marcarActividad() {
+  _ultimaActividad = Date.now();
+  if (_avisoInactividad) { _avisoInactividad.remove(); _avisoInactividad = null; }
+}
+
+function iniciarControlInactividad() {
+  if (_timerInactividad) return; // ya está activo
+  ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"]
+    .forEach(ev => document.addEventListener(ev, _marcarActividad, { passive: true }));
+
+  _timerInactividad = setInterval(async () => {
+    const inactivo = Date.now() - _ultimaActividad;
+    const limite = MINUTOS_INACTIVIDAD * 60000;
+    if (inactivo >= limite) {
+      clearInterval(_timerInactividad); _timerInactividad = null;
+      sessionStorage.setItem("cierre_inactividad", "1");
+      await sb.auth.signOut();
+      location.reload();
+    } else if (inactivo >= limite - 60000 && !_avisoInactividad) {
+      _avisoInactividad = document.createElement("div");
+      _avisoInactividad.className = "aviso-inactividad";
+      _avisoInactividad.textContent =
+        "Tu sesión se cerrará por inactividad en 1 minuto. Mueve el mouse o toca la pantalla para seguir conectado.";
+      document.body.appendChild(_avisoInactividad);
+    }
+  }, 15000);
 }
 
 document.getElementById("btn-login").addEventListener("click", async () => {
@@ -75,6 +117,8 @@ async function cargarPerfilYArmarApp(user) {
   document.getElementById("app").classList.remove("oculto");
   document.getElementById("quien-soy").textContent = `${perfil.nombre} · ${etiquetaRol(perfil.rol)}`;
   montarSelectorRolVista();
+  _ultimaActividad = Date.now();
+  iniciarControlInactividad();
 
   // Clave provisoria: al primer ingreso obliga a cambiarla antes de seguir.
   if (perfil.debe_cambiar_clave) {
