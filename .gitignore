@@ -10,3 +10,6 @@ $RECYCLE.BIN/
 
 # macOS
 .DS_Store
+
+# Archivos de prueba (no van al repo)
+*[Pp]rueba*
