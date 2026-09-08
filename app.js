@@ -48,27 +48,35 @@ function _marcarActividad() {
   if (_avisoInactividad) { _avisoInactividad.remove(); _avisoInactividad = null; }
 }
 
+async function _revisarInactividad() {
+  const inactivo = Date.now() - _ultimaActividad;
+  const limite = MINUTOS_INACTIVIDAD * 60000;
+  if (inactivo >= limite) {
+    clearInterval(_timerInactividad); _timerInactividad = null;
+    sessionStorage.setItem("cierre_inactividad", "1");
+    try { await sb.auth.signOut(); } catch (e) {}
+    location.reload();
+  } else if (inactivo >= limite - 60000 && !_avisoInactividad) {
+    _avisoInactividad = document.createElement("div");
+    _avisoInactividad.className = "aviso-inactividad";
+    _avisoInactividad.textContent =
+      "Tu sesión se cerrará por inactividad en 1 minuto. Toca la pantalla o el teclado para seguir conectado.";
+    document.body.appendChild(_avisoInactividad);
+  }
+}
+
 function iniciarControlInactividad() {
   if (_timerInactividad) return; // ya está activo
-  ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"]
-    .forEach(ev => document.addEventListener(ev, _marcarActividad, { passive: true }));
+  // OJO: no incluye "mousemove" a propósito — un movimiento involuntario del
+  // cursor mantendría la sesión abierta para siempre. Cuenta como actividad
+  // un clic, tecla, scroll o toque real.
+  ["pointerdown", "keydown", "wheel", "scroll", "touchstart"]
+    .forEach(ev => window.addEventListener(ev, _marcarActividad, { passive: true, capture: true }));
+  // Al volver a la pestaña tras un rato, revisa de inmediato (por si el
+  // navegador frenó el timer mientras estaba en segundo plano).
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) _revisarInactividad(); });
 
-  _timerInactividad = setInterval(async () => {
-    const inactivo = Date.now() - _ultimaActividad;
-    const limite = MINUTOS_INACTIVIDAD * 60000;
-    if (inactivo >= limite) {
-      clearInterval(_timerInactividad); _timerInactividad = null;
-      sessionStorage.setItem("cierre_inactividad", "1");
-      await sb.auth.signOut();
-      location.reload();
-    } else if (inactivo >= limite - 60000 && !_avisoInactividad) {
-      _avisoInactividad = document.createElement("div");
-      _avisoInactividad.className = "aviso-inactividad";
-      _avisoInactividad.textContent =
-        "Tu sesión se cerrará por inactividad en 1 minuto. Mueve el mouse o toca la pantalla para seguir conectado.";
-      document.body.appendChild(_avisoInactividad);
-    }
-  }, 15000);
+  _timerInactividad = setInterval(_revisarInactividad, 20000);
 }
 
 document.getElementById("btn-login").addEventListener("click", async () => {
@@ -461,10 +469,6 @@ async function vistaNuevaSolicitud() {
         <label style="margin-top:0">¿Ya tienes el Formulario Único en PDF editable? Cárgalo y se autocompleta</label>
         <input id="ns-pdf" type="file" accept="application/pdf">
         <p class="hint" id="ns-pdf-msg">Lee los campos del PDF y llena el formulario de abajo. Igual puedes revisarlo y corregirlo antes de enviar.</p>
-
-        <label>Adjuntar el Formulario Único firmado (PDF)</label>
-        <input id="ns-formulario" type="file" accept=".pdf,image/*">
-        <p class="hint">El formulario ya visado que se anexa al memo.</p>
       </div>
 
       <h4>1. Identificación del requerimiento</h4>
@@ -527,9 +531,13 @@ async function vistaNuevaSolicitud() {
       <h4>5. Situaciones especiales</h4>
       <label class="chk"><input type="checkbox" id="ns-cdp-negativo"> Solicitud con CDP negativo (Manual, punto 8)</label>
       <label class="chk"><input type="checkbox" id="ns-fuera-catalogo"> El producto NO figura en el catálogo cerrado del contrato (Manual, punto 10)</label>
-      <p class="hint oculto" id="ns-aviso-especial">Al marcar "fuera de catálogo" la solicitud entra como
-        <strong>especial</strong>: en su expediente deberás adjuntar la justificación de la Unidad Jurídica
-        y de la DAF, y la compra se tramita por Mercado Público.</p>
+      <div id="ns-especial-extra" class="oculto">
+        <p class="hint" style="color:var(--warn)">Al marcar "fuera de catálogo" la solicitud entra como
+          <strong>especial</strong>: la compra se tramita por Mercado Público. Adjunta la justificación
+          y en el expediente completa la cotización, el decreto y la orden de compra.</p>
+        <label>Adjuntar justificación de la solicitud (fuera de catálogo)</label>
+        <input id="ns-just" type="file" accept=".pdf,.doc,.docx,image/*">
+      </div>
 
       <button class="primario" id="ns-guardar">Ingresar solicitud</button>
       <p class="error oculto" id="ns-error"></p>
@@ -550,7 +558,7 @@ async function vistaNuevaSolicitud() {
   });
 
   document.getElementById("ns-fuera-catalogo").addEventListener("change", (e) => {
-    document.getElementById("ns-aviso-especial").classList.toggle("oculto", !e.target.checked);
+    document.getElementById("ns-especial-extra").classList.toggle("oculto", !e.target.checked);
   });
   document.getElementById("ns-pdf").addEventListener("change", (e) => {
     if (e.target.files[0]) leerFormularioPDF(e.target.files[0]);
@@ -631,7 +639,7 @@ async function leerFormularioPDF(file) {
     document.getElementById("ns-cdp-negativo").checked = C("chk_cdp_negativo");
     const fuera = C("chk_no_catalogo");
     document.getElementById("ns-fuera-catalogo").checked = fuera;
-    document.getElementById("ns-aviso-especial").classList.toggle("oculto", !fuera);
+    document.getElementById("ns-especial-extra").classList.toggle("oculto", !fuera);
 
     msg.textContent = "Formulario autocompletado desde el PDF. Revísalo y corrige lo que falte.";
   } catch (e) {
@@ -663,9 +671,10 @@ async function guardarSolicitud() {
     if (!f || !f.files[0]) return { url: null };
     return subirArchivo("memos", f.files[0]);
   };
-  const rForm = await subeUno("ns-formulario"); if (rForm.error) { mostrarError(rForm.error); return; }
-  const rMemo = await subeUno("ns-memo");       if (rMemo.error) { mostrarError(rMemo.error); return; }
-  const rFoto = await subeUno("ns-foto");       if (rFoto.error) { mostrarError(rFoto.error); return; }
+  const rMemo = await subeUno("ns-memo");  if (rMemo.error) { mostrarError(rMemo.error); return; }
+  const rFoto = await subeUno("ns-foto");  if (rFoto.error) { mostrarError(rFoto.error); return; }
+  const rJust = fuera_catalogo ? await subirArchivo("especiales", (document.getElementById("ns-just") || {}).files?.[0]) : { url: null };
+  if (rJust.error) { mostrarError(rJust.error); return; }
 
   const descripcion_requerimiento = val("ns-desc");
   const situacion_actual = val("ns-situacion");
@@ -690,10 +699,10 @@ async function guardarSolicitud() {
     tipo: fuera_catalogo ? "especial" : "normal",
   };
   if (rMemo.url) payload.memo_url = rMemo.url;
-  if (rForm.url) payload.formulario_url = rForm.url;
   if (rFoto.url) payload.resp_fotografico_url = rFoto.url;
   if (fuera_catalogo) {
     payload.justificacion_especial = [descripcion_requerimiento, motivo, situacion_actual].filter(Boolean).join(" — ");
+    if (rJust.url) payload.just_juridica_url = rJust.url;
   }
 
   const { data: solicitud, error } = await sb.from("solicitud").insert(payload).select().single();
@@ -1002,7 +1011,6 @@ async function vistaExpediente(id) {
         <div><div class="d-k">Contacto</div>${s.contacto || "—"}</div>
         <div><div class="d-k">Supervisa ejecución</div>${s.supervisor || "—"}</div>
         <div><div class="d-k">Ubicación de uso</div>${s.ubicacion || "—"}</div>
-        <div><div class="d-k">Formulario Único firmado</div>${s.formulario_url ? `<a href="${s.formulario_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
         <div><div class="d-k">Memo de solicitud</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
         <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
       </div>
