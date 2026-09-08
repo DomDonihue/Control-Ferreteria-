@@ -461,6 +461,10 @@ async function vistaNuevaSolicitud() {
         <label style="margin-top:0">¿Ya tienes el Formulario Único en PDF editable? Cárgalo y se autocompleta</label>
         <input id="ns-pdf" type="file" accept="application/pdf">
         <p class="hint" id="ns-pdf-msg">Lee los campos del PDF y llena el formulario de abajo. Igual puedes revisarlo y corregirlo antes de enviar.</p>
+
+        <label>Adjuntar el Formulario Único firmado (PDF)</label>
+        <input id="ns-formulario" type="file" accept=".pdf,image/*">
+        <p class="hint">El formulario ya visado que se anexa al memo.</p>
       </div>
 
       <h4>1. Identificación del requerimiento</h4>
@@ -507,16 +511,19 @@ async function vistaNuevaSolicitud() {
       <p class="totales">Monto total estimado: <b id="ns-total">$0</b></p>
 
       <h4>4. Respaldos adjuntos</h4>
+
+      <label>Memo de solicitud (Memorándum)</label>
+      <input id="ns-memo" type="file" accept=".pdf,.doc,.docx,image/*">
+
       <label class="chk"><input type="checkbox" id="ns-resp-foto"> Respaldo fotográfico &nbsp;·&nbsp; N° de fotografías:
         <input id="ns-num-fotos" type="number" min="0" class="chk-inline"></label>
+      <input id="ns-foto" type="file" accept=".pdf,image/*">
+      <p class="hint">PDF o imagen del daño / situación (máx. 10 MB). Si son varias fotos, únelas en un PDF.</p>
+
       <label class="chk"><input type="checkbox" id="ns-resp-informe"> Informe técnico complementario / cubicación de materiales</label>
       <label class="chk"><input type="checkbox" id="ns-resp-presupuesto"> Presupuesto estimativo / planificación del trabajo</label>
       <label class="chk"><input type="checkbox" id="ns-resp-otro"> Otro:
         <input id="ns-resp-otro-texto" placeholder="especificar" class="chk-inline" style="width:220px"></label>
-
-      <label>Adjuntar el Formulario Único firmado / memo (PDF, Word o foto)</label>
-      <input id="ns-memo" type="file" accept=".pdf,.doc,.docx,image/*">
-      <p class="hint">Es el documento que se anexa al Memorándum de Solicitud (máx. 10 MB).</p>
 
       <h4>5. Situaciones especiales</h4>
       <label class="chk"><input type="checkbox" id="ns-cdp-negativo"> Solicitud con CDP negativo (Manual, punto 8)</label>
@@ -657,14 +664,15 @@ async function guardarSolicitud() {
   if (!ubicacion) { mostrarError("Indica la ubicación de uso de los materiales."); return; }
   if (!lineasSolicitud.length) { mostrarError("Agrega al menos un material."); return; }
 
-  // Adjunto (Formulario Único firmado / memo) → bucket "memos"
-  let memo_url = null;
-  const file = document.getElementById("ns-memo").files[0];
-  if (file) {
-    const { url, error: upErr } = await subirArchivo("memos", file);
-    if (upErr) { mostrarError(upErr); return; }
-    memo_url = url;
-  }
+  // Adjuntos → bucket "memos"
+  const subeUno = async (id) => {
+    const f = document.getElementById(id);
+    if (!f || !f.files[0]) return { url: null };
+    return subirArchivo("memos", f.files[0]);
+  };
+  const rForm = await subeUno("ns-formulario"); if (rForm.error) { mostrarError(rForm.error); return; }
+  const rMemo = await subeUno("ns-memo");       if (rMemo.error) { mostrarError(rMemo.error); return; }
+  const rFoto = await subeUno("ns-foto");       if (rFoto.error) { mostrarError(rFoto.error); return; }
 
   const monto_estimado = lineasSolicitud.reduce((a, l) => a + Number(l.valor_referencial || 0), 0);
   const descripcion_requerimiento = val("ns-desc");
@@ -681,7 +689,7 @@ async function guardarSolicitud() {
     trabajo_ejecutar: val("ns-trabajo") || null,
     beneficio_publico: val("ns-beneficio") || null,
     monto_estimado,
-    resp_fotografico: document.getElementById("ns-resp-foto").checked,
+    resp_fotografico: document.getElementById("ns-resp-foto").checked || !!rFoto.url,
     num_fotos: parseInt(document.getElementById("ns-num-fotos").value) || null,
     resp_informe_tecnico: document.getElementById("ns-resp-informe").checked,
     resp_presupuesto: document.getElementById("ns-resp-presupuesto").checked,
@@ -690,7 +698,9 @@ async function guardarSolicitud() {
     cdp_negativo: document.getElementById("ns-cdp-negativo").checked,
     tipo: fuera_catalogo ? "especial" : "normal",
   };
-  if (memo_url) payload.memo_url = memo_url;
+  if (rMemo.url) payload.memo_url = rMemo.url;
+  if (rForm.url) payload.formulario_url = rForm.url;
+  if (rFoto.url) payload.resp_fotografico_url = rFoto.url;
   if (fuera_catalogo) {
     payload.justificacion_especial = [descripcion_requerimiento, motivo, situacion_actual].filter(Boolean).join(" — ");
   }
@@ -1002,7 +1012,9 @@ async function vistaExpediente(id) {
         <div><div class="d-k">Contacto</div>${s.contacto || "—"}</div>
         <div><div class="d-k">Supervisa ejecución</div>${s.supervisor || "—"}</div>
         <div><div class="d-k">Ubicación de uso</div>${s.ubicacion || "—"}</div>
-        <div><div class="d-k">Formulario / memo</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Formulario Único firmado</div>${s.formulario_url ? `<a href="${s.formulario_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Memo de solicitud</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Descripción y justificación técnica</h4></div>

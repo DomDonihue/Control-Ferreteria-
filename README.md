@@ -388,6 +388,8 @@ alter table solicitud add column if not exists resp_presupuesto          boolean
 alter table solicitud add column if not exists resp_otro                 boolean default false;
 alter table solicitud add column if not exists resp_otro_texto           text;
 alter table solicitud add column if not exists cdp_negativo              boolean default false;
+-- adjuntos de la solicitud (sección 4)
+alter table solicitud add column if not exists formulario_url               text;
 -- adjuntos de la solicitud especial / CDP negativo
 alter table solicitud add column if not exists just_juridica_url            text;
 alter table solicitud add column if not exists just_daf_url                 text;
