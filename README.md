@@ -380,7 +380,6 @@ alter table solicitud add column if not exists descripcion_requerimiento text;
 alter table solicitud add column if not exists situacion_actual          text;
 alter table solicitud add column if not exists trabajo_ejecutar          text;
 alter table solicitud add column if not exists beneficio_publico         text;
-alter table solicitud add column if not exists monto_estimado            numeric;
 alter table solicitud add column if not exists resp_fotografico          boolean default false;
 alter table solicitud add column if not exists num_fotos                 integer;
 alter table solicitud add column if not exists resp_informe_tecnico      boolean default false;
@@ -398,9 +397,9 @@ alter table solicitud add column if not exists just_reforzada_url           text
 alter table solicitud add column if not exists pronunciamiento_juridica_url text;
 alter table solicitud add column if not exists resp_fotografico_url         text;
 
--- FORMULARIO ÚNICO: campos nuevos en el detalle de materiales
+-- FORMULARIO ÚNICO: detalle de materiales — solo material y cantidad
+-- (los valores llegan en las guías de despacho, no en la solicitud)
 alter table solicitud_detalle add column if not exists unidad_medida_libre text;
-alter table solicitud_detalle add column if not exists valor_referencial   numeric;
 ```
 
 ## Solicitud especial (material fuera de catálogo) + notas de crédito

@@ -499,16 +499,15 @@ async function vistaNuevaSolicitud() {
       <textarea id="ns-beneficio" rows="2"></textarea>
 
       <h4>3. Detalle de materiales solicitados</h4>
+      <p class="hint">Solo material y cantidad. Los valores llegan después en las guías de despacho.</p>
       <div id="ns-lineas"></div>
-      <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr 1fr auto">
+      <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr auto">
         <div><label>Material</label><input id="ns-mat" list="ns-catalogo" placeholder="Nombre del material"></div>
         <div><label>Cantidad</label><input id="ns-cant" type="number" min="0" step="0.01"></div>
         <div><label>Unidad</label><input id="ns-um" placeholder="un, m, kg, saco…"></div>
-        <div><label>Valor ref. ($)</label><input id="ns-valor" type="number" min="0" step="1"></div>
         <div><button class="secundario" id="ns-agregar" style="margin-top:0">+ Agregar</button></div>
       </div>
       <datalist id="ns-catalogo">${(articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("")}</datalist>
-      <p class="totales">Monto total estimado: <b id="ns-total">$0</b></p>
 
       <h4>4. Respaldos adjuntos</h4>
 
@@ -545,9 +544,8 @@ async function vistaNuevaSolicitud() {
       descripcion: mat,
       cantidad_solicitada: cant,
       unidad_medida: document.getElementById("ns-um").value.trim(),
-      valor_referencial: parseFloat(document.getElementById("ns-valor").value) || 0,
     });
-    ["ns-mat", "ns-cant", "ns-um", "ns-valor"].forEach(id => document.getElementById(id).value = "");
+    ["ns-mat", "ns-cant", "ns-um"].forEach(id => document.getElementById(id).value = "");
     pintarLineas();
   });
 
@@ -563,20 +561,16 @@ async function vistaNuevaSolicitud() {
 
 function pintarLineas() {
   const cont = document.getElementById("ns-lineas");
-  const total = lineasSolicitud.reduce((a, l) => a + Number(l.valor_referencial || 0), 0);
-  const tEl = document.getElementById("ns-total");
-  if (tEl) tEl.textContent = money(total);
   if (!lineasSolicitud.length) {
     cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas materiales.</p>";
     return;
   }
   cont.innerHTML = `<table>
-    <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th class="num">Valor ref.</th><th></th></tr>
+    <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th></th></tr>
     ${lineasSolicitud.map((l, i) => `<tr>
         <td>${l.descripcion}</td>
         <td class="num">${l.cantidad_solicitada}</td>
         <td>${l.unidad_medida || "—"}</td>
-        <td class="num">${money(l.valor_referencial)}</td>
         <td><button class="secundario" onclick="quitarLinea(${i})">Quitar</button></td>
       </tr>`).join("")}
   </table>`;
@@ -624,7 +618,6 @@ async function leerFormularioPDF(file) {
         descripcion: mat,
         cantidad_solicitada: num(T(`mat_r${r}_c1`)),
         unidad_medida: T(`mat_r${r}_c2`),
-        valor_referencial: num(T(`mat_r${r}_c3`)),
       });
     }
     pintarLineas();
@@ -674,7 +667,6 @@ async function guardarSolicitud() {
   const rMemo = await subeUno("ns-memo");       if (rMemo.error) { mostrarError(rMemo.error); return; }
   const rFoto = await subeUno("ns-foto");       if (rFoto.error) { mostrarError(rFoto.error); return; }
 
-  const monto_estimado = lineasSolicitud.reduce((a, l) => a + Number(l.valor_referencial || 0), 0);
   const descripcion_requerimiento = val("ns-desc");
   const situacion_actual = val("ns-situacion");
 
@@ -688,7 +680,6 @@ async function guardarSolicitud() {
     situacion_actual: situacion_actual || null,
     trabajo_ejecutar: val("ns-trabajo") || null,
     beneficio_publico: val("ns-beneficio") || null,
-    monto_estimado,
     resp_fotografico: document.getElementById("ns-resp-foto").checked || !!rFoto.url,
     num_fotos: parseInt(document.getElementById("ns-num-fotos").value) || null,
     resp_informe_tecnico: document.getElementById("ns-resp-informe").checked,
@@ -714,7 +705,6 @@ async function guardarSolicitud() {
     descripcion_libre: l.descripcion,
     unidad_medida_libre: l.unidad_medida || null,
     cantidad_solicitada: l.cantidad_solicitada,
-    valor_referencial: l.valor_referencial || null,
   }));
   const { error: errorDetalle } = await sb.from("solicitud_detalle").insert(detalle);
   if (errorDetalle) { mostrarError(errorDetalle.message); return; }
@@ -1028,15 +1018,12 @@ async function vistaExpediente(id) {
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Materiales solicitados</h4></div>
       <table>
-        <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th class="num">Valor ref.</th></tr>
+        <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th></tr>
         ${(detalle || []).map(d => `<tr>
           <td>${d.articulo?.descripcion || d.descripcion_libre || ""}</td>
           <td class="num">${d.cantidad_solicitada}</td>
           <td>${d.unidad_medida_libre || d.articulo?.unidad_medida || "—"}</td>
-          <td class="num">${d.valor_referencial ? money(d.valor_referencial) : "—"}</td>
         </tr>`).join("")}
-        <tr><td colspan="3" style="text-align:right;font-weight:700">Monto total estimado</td>
-            <td class="num" style="font-weight:700">${money(s.monto_estimado)}</td></tr>
       </table>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Respaldos y situaciones especiales</h4></div>
@@ -1684,29 +1671,21 @@ function descargarHojaPDF() {
 
   doc.text("N°", M, y);
   doc.text("Material", M + 12, y);
-  doc.text("Cant.", 120, y);
-  doc.text("Unidad", 140, y);
-  doc.text("Valor ref. $", 168, y);
+  doc.text("Cantidad", 140, y);
+  doc.text("Unidad", 172, y);
   doc.setFont("helvetica", "normal");
   y += 2; doc.line(M, y, 210 - M, y); y += 6;
 
   (detalle || []).forEach((d, i) => {
     if (y > 265) { doc.addPage(); y = M; }
     doc.text(String(i + 1), M, y);
-    doc.text(doc.splitTextToSize(String(d.articulo?.descripcion || d.descripcion_libre || ""), 100), M + 12, y);
-    doc.text(String(d.cantidad_solicitada ?? ""), 120, y);
-    doc.text(String(d.unidad_medida_libre || d.articulo?.unidad_medida || ""), 140, y);
-    doc.text(d.valor_referencial ? Number(d.valor_referencial).toLocaleString("es-CL") : "", 168, y);
+    doc.text(doc.splitTextToSize(String(d.articulo?.descripcion || d.descripcion_libre || ""), 120), M + 12, y);
+    doc.text(String(d.cantidad_solicitada ?? ""), 140, y);
+    doc.text(String(d.unidad_medida_libre || d.articulo?.unidad_medida || ""), 172, y);
     y += 7;
   });
-  doc.line(M, y - 3, 210 - M, y - 3);
-  doc.setFont("helvetica", "bold");
-  doc.text("MONTO TOTAL ESTIMADO", M + 12, y);
-  doc.text("$ " + Number(s.monto_estimado || 0).toLocaleString("es-CL"), 168, y);
-  doc.setFont("helvetica", "normal");
-  y += 8;
 
-  y += 10;
+  y += 12;
   doc.line(M, y, 90, y); y += 5;
   doc.text("Encargado de Operaciones (ITO)", M, y);
   y += 16;
