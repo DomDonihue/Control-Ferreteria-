@@ -19,9 +19,12 @@
 -- Requiere public.rol_actual() (ya está en el README).
 --
 -- ---------------------------------------------------------------------
--- ANTES DE CORRER EL BLOQUE 4: pásame el resultado de estas 3 consultas.
--- El bloque 4 toca el saldo del convenio y necesito ver cómo está armado
--- hoy para no descuadrarlo.
+-- CÓMO CORRERLO: pega este archivo COMPLETO en el SQL Editor de Supabase
+-- y ejecútalo de una vez. Está envuelto en begin/commit: si algo falla,
+-- no queda nada a medias. Si el bloque 4.2 diera error, mándame el texto.
+--
+-- Y pásame el resultado de estas 3 consultas para verificar el bloque 4
+-- (signo del reverso / vista del Resumen) antes de conectar la app:
 --
 --   -- a) definición de la vista del Resumen
 --   select pg_get_viewdef('public.resumen_convenio', true);
@@ -148,7 +151,10 @@ drop policy if exists "nc elimina"      on nota_credito;
 
 -- =====================================================================
 -- BLOQUE 4 — Libro append-only + anular_factura() con reverso del saldo
--- >>> REVISAR CON EL DUMP DEL ENCABEZADO ANTES DE CORRER <<<
+-- Es seguro correrlo: todo es aditivo, el constraint se arma con los
+-- valores que ya existen, y la función solo se DEFINE (no se ejecuta hasta
+-- que la llame la app). Igual pásame los 3 dumps del encabezado para
+-- confirmar el signo del reverso y si hay que redefinir la vista (4.5).
 -- =====================================================================
 
 -- 4.1 trazabilidad en el libro
@@ -158,11 +164,21 @@ alter table movimiento_saldo add column if not exists factura_id uuid references
 alter table movimiento_saldo add column if not exists reversa_de bigint;   -- id del movimiento que este reverso corrige
 alter table movimiento_saldo add column if not exists anulado    boolean not null default false;
 
--- 4.2 ampliar los tipos permitidos. Si tu trigger de compra usa otro
---     nombre para el egreso (p.ej. 'compra' o 'salida'), déjalo en la lista.
-alter table movimiento_saldo drop constraint if exists movimiento_saldo_tipo_check;
-alter table movimiento_saldo add constraint movimiento_saldo_tipo_check
-  check (tipo in ('apertura','compra','egreso','nota_credito','reverso','ajuste'));
+-- 4.2 ampliar los tipos permitidos SIN rechazar lo que ya existe: toma los
+--     valores actuales de la tabla y les suma los nuevos que necesitamos.
+do $$
+declare v_lista text;
+begin
+  select coalesce(string_agg(distinct quote_literal(tipo), ','), '') into v_lista
+  from movimiento_saldo where tipo is not null;
+  v_lista := nullif(v_lista, '');
+  v_lista := concat_ws(',', v_lista,
+    quote_literal('apertura'), quote_literal('egreso'),
+    quote_literal('reverso'),  quote_literal('ajuste'),
+    quote_literal('nota_credito'));
+  execute 'alter table movimiento_saldo drop constraint if exists movimiento_saldo_tipo_check';
+  execute 'alter table movimiento_saldo add constraint movimiento_saldo_tipo_check check (tipo in (' || v_lista || '))';
+end $$;
 
 -- 4.3 poder ubicar el descuento de cada factura (hoy se enlaza por
 --     compra.n_oc = 'FACT '||numero). Se rellena factura_id hacia atrás.
