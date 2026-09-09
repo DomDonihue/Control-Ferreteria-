@@ -81,10 +81,13 @@ create index if not exists bitacora_entidad_idx   on bitacora(entidad, entidad_i
 create index if not exists bitacora_fecha_idx     on bitacora(ocurrido_en desc);
 
 alter table bitacora enable row level security;
--- Lectura: cualquiera autenticado. Escritura: NADIE directo — solo las
--- funciones/triggers 'security definer' de abajo escriben en bitácora.
+-- Lectura: solo los roles de control -> Administrador, Director de Obras y DAF.
+-- (El ITO/admin_ito NO la ve: es quien ejecuta los movimientos, no quien los
+--  audita. El Alcalde solo ve el Resumen. El solicitante, nada.)
+-- Escritura: NADIE directo — solo los triggers 'security definer' de abajo.
 drop policy if exists "bitacora lectura" on bitacora;
-create policy "bitacora lectura" on bitacora for select using (auth.role() = 'authenticated');
+create policy "bitacora lectura" on bitacora for select
+  using (public.rol_actual() in ('admin','lector_operativo','lector_pagos'));
 grant select on bitacora to authenticated;
 revoke insert, update, delete on bitacora from authenticated;
 
