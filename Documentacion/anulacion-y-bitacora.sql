@@ -21,24 +21,13 @@
 -- ---------------------------------------------------------------------
 -- CÓMO CORRERLO: pega este archivo COMPLETO en el SQL Editor de Supabase
 -- y ejecútalo de una vez. Está envuelto en begin/commit: si algo falla,
--- no queda nada a medias. Si el bloque 4.2 diera error, mándame el texto.
+-- no queda nada a medias.
 --
--- Y pásame el resultado de estas 3 consultas para verificar el bloque 4
--- (signo del reverso / vista del Resumen) antes de conectar la app:
---
---   -- a) definición de la vista del Resumen
---   select pg_get_viewdef('public.resumen_convenio', true);
---
---   -- b) el trigger/función que hoy descuenta del convenio al insertar en `compra`
---   select pg_get_functiondef(p.oid)
---   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
---   where n.nspname = 'public' and p.proname = 'fn_registrar_movimiento_compra';
---
---   -- c) constraint de tipo y columnas actuales de movimiento_saldo
---   select conname, pg_get_constraintdef(oid) from pg_constraint
---   where conrelid = 'public.movimiento_saldo'::regclass;
---   select column_name, data_type, is_nullable from information_schema.columns
---   where table_schema='public' and table_name='movimiento_saldo' order by ordinal_position;
+-- Ya verificado contra la base real (sep 2026):
+--   * resumen_convenio: saldo = tope + sum(monto) where tipo<>'apertura'
+--   * fn_registrar_movimiento_compra: 'compra' guarda monto = -monto_total
+--   * check de tipo actual: ('apertura','compra','ajuste','devolucion')
+--   -> el reverso guarda monto = +monto_bruto y la vista NO se toca.
 -- =====================================================================
 
 begin;
@@ -151,10 +140,8 @@ drop policy if exists "nc elimina"      on nota_credito;
 
 -- =====================================================================
 -- BLOQUE 4 — Libro append-only + anular_factura() con reverso del saldo
--- Es seguro correrlo: todo es aditivo, el constraint se arma con los
--- valores que ya existen, y la función solo se DEFINE (no se ejecuta hasta
--- que la llame la app). Igual pásame los 3 dumps del encabezado para
--- confirmar el signo del reverso y si hay que redefinir la vista (4.5).
+-- Todo aditivo. La función solo se DEFINE (no se ejecuta hasta que la
+-- llame la app). Verificado contra la base real: ver encabezado.
 -- =====================================================================
 
 -- 4.1 trazabilidad en el libro
@@ -164,21 +151,12 @@ alter table movimiento_saldo add column if not exists factura_id uuid references
 alter table movimiento_saldo add column if not exists reversa_de bigint;   -- id del movimiento que este reverso corrige
 alter table movimiento_saldo add column if not exists anulado    boolean not null default false;
 
--- 4.2 ampliar los tipos permitidos SIN rechazar lo que ya existe: toma los
---     valores actuales de la tabla y les suma los nuevos que necesitamos.
-do $$
-declare v_lista text;
-begin
-  select coalesce(string_agg(distinct quote_literal(tipo), ','), '') into v_lista
-  from movimiento_saldo where tipo is not null;
-  v_lista := nullif(v_lista, '');
-  v_lista := concat_ws(',', v_lista,
-    quote_literal('apertura'), quote_literal('egreso'),
-    quote_literal('reverso'),  quote_literal('ajuste'),
-    quote_literal('nota_credito'));
-  execute 'alter table movimiento_saldo drop constraint if exists movimiento_saldo_tipo_check';
-  execute 'alter table movimiento_saldo add constraint movimiento_saldo_tipo_check check (tipo in (' || v_lista || '))';
-end $$;
+-- 4.2 ampliar los tipos permitidos. El check actual es
+--     ('apertura','compra','ajuste','devolucion') -> se conservan todos y
+--     se agrega 'reverso' (el que usa la anulación).
+alter table movimiento_saldo drop constraint if exists movimiento_saldo_tipo_check;
+alter table movimiento_saldo add constraint movimiento_saldo_tipo_check
+  check (tipo in ('apertura','compra','ajuste','devolucion','reverso'));
 
 -- 4.3 poder ubicar el descuento de cada factura (hoy se enlaza por
 --     compra.n_oc = 'FACT '||numero). Se rellena factura_id hacia atrás.
@@ -191,10 +169,10 @@ join factura f on f.solicitud_id = c.solicitud_id and ('FACT '||f.numero) = c.n_
 where m.compra_id = c.id and m.factura_id is null;
 
 -- 4.4 FUNCIÓN: anular una factura, todo en una transacción.
---     Convención del libro (ver recalcularSaldoContrato en app.js):
---       apertura  -> monto = +tope,           saldo = monto
---       egreso    -> monto = -monto_bruto,     saldo = saldo_previo + monto
---       reverso   -> monto = +monto_bruto,     saldo = saldo_previo + monto  (devuelve saldo)
+--     La vista resumen_convenio hace: saldo = tope + sum(monto) where tipo<>'apertura'.
+--     'compra' guarda monto = -monto_total (negativo).  Entonces el reverso
+--     guarda monto = +monto_bruto: en la suma cancela al egreso -> saldo vuelve
+--     a lo que estaba. NO hay que redefinir la vista.
 create or replace function public.anular_factura(p_factura_id uuid, p_motivo text)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -240,11 +218,16 @@ begin
     return jsonb_build_object('reversado', false);
   end if;
 
-  -- 3) bloquear los movimientos del contrato y tomar el último saldo
+  -- 3) bloquear los movimientos del contrato y calcular el saldo actual
+  --    con la MISMA fórmula que la vista (fuente de la verdad).
   perform 1 from movimiento_saldo where contrato_id = v_contrato for update;
-  select saldo_resultante into v_saldo
-    from movimiento_saldo where contrato_id = v_contrato
-   order by id desc limit 1;
+  select ct.monto_tope_anual
+       + coalesce(sum(m.monto) filter (where m.tipo <> 'apertura'), 0)
+    into v_saldo
+  from contrato ct
+  left join movimiento_saldo m on m.contrato_id = ct.id
+  where ct.id = v_contrato
+  group by ct.monto_tope_anual;
 
   -- 4) movimiento NUEVO de reverso (+monto_bruto). El original NO se borra.
   insert into movimiento_saldo(contrato_id, compra_id, factura_id, tipo, monto,
@@ -270,23 +253,10 @@ end $$;
 
 grant execute on function public.anular_factura(uuid, text) to authenticated;
 
--- 4.5 (OPCIONAL — solo si tras una prueba el Resumen NO refleja el reverso)
---     Redefinir la vista para que ignore lo anulado y sume los reversos.
---     Ajusta los nombres de columna a los que devuelva pg_get_viewdef.
---
--- create or replace view resumen_convenio as
--- select
---   c.id                                        as contrato_id,
---   c.proveedor,
---   c.monto_tope_anual                          as tope_anual,
---   coalesce(-sum(m.monto) filter (where m.tipo <> 'apertura'), 0) as comprometido,
---   c.monto_tope_anual + coalesce(sum(m.monto) filter (where m.tipo <> 'apertura'), 0) as saldo_disponible,
---   round(100.0 * coalesce(-sum(m.monto) filter (where m.tipo <> 'apertura'),0)
---         / nullif(c.monto_tope_anual,0), 1)    as porcentaje_usado
--- from contrato c
--- left join movimiento_saldo m on m.contrato_id = c.id
--- where c.estado = 'vigente'
--- group by c.id, c.proveedor, c.monto_tope_anual;
+-- 4.5 La vista resumen_convenio NO se toca: ya suma `monto` sobre todos los
+--     movimientos (salvo 'apertura'), así que el 'reverso' +monto_bruto
+--     cancela al egreso -monto_bruto y el saldo vuelve solo. El campo
+--     movimiento_saldo.anulado es solo informativo (para la bitácora/UI).
 
 commit;
 
