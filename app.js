@@ -249,6 +249,8 @@ const rolEfectivo  = () => rolVista || (perfilActual && perfilActual.rol);
 const esAdminTotal = () => rolEfectivo() === "admin";
 const puedeOperar  = () => ["admin", "admin_ito"].includes(rolEfectivo());
 const esDirector   = () => ["admin", "lector_operativo"].includes(rolEfectivo());
+// Roles de control que pueden auditar la bitácora (no el ITO ni el Alcalde).
+const puedeVerBitacora = () => ["admin", "lector_operativo", "lector_pagos"].includes(rolEfectivo());
 
 // IVA Chile
 const IVA = 0.19;
@@ -272,6 +274,7 @@ const ICONOS = {
   bag:         `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 7h10l1 9H4z"/><path d="M7 7V5.5a3 3 0 0 1 6 0V7"/></svg>`,
   shield:      `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-3 6.7-6.5 7.5C6.5 16.7 3.5 14 3.5 10V5z"/><path d="M7.3 10 9 11.7l3.7-3.9"/></svg>`,
   percent:     `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M15 5 5 15"/><circle cx="6.5" cy="6.5" r="1.8"/><circle cx="13.5" cy="13.5" r="1.8"/></svg>`,
+  bitacora:    `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg>`,
 };
 
 // ---------------------------------------------------------------------
@@ -283,6 +286,7 @@ const TABS = [
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
+  { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
   { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin"], render: vistaCatalogo },
   { id: "convenio", label: "Convenio / ferretería", grupo: "Administración", icono: "convenio", roles: ["admin"], render: vistaConvenio },
   { id: "usuarios", label: "Usuarios", grupo: "Administración", icono: "usuarios", roles: ["admin"], render: vistaUsuarios },
@@ -891,7 +895,7 @@ let editarFacturaId = null;
 
 async function vistaExpediente(id) {
   vista().innerHTML = "<div class='card'>Cargando expediente…</div>";
-  const [{ data: s, error }, { data: detalle }, { data: guias }, { data: facturas }, { data: cotizaciones }, { data: notasCredito }, { data: comprasSol }] = await Promise.all([
+  const [{ data: s, error }, { data: detalle }, { data: guias }, { data: facturas }, { data: cotizaciones }, { data: notasCredito }, { data: comprasSol }, { data: bitacoraRows }] = await Promise.all([
     sb.from("solicitud").select("*, unidad(nombre), obra(nombre)").eq("id", id).single(),
     sb.from("solicitud_detalle").select("cantidad_solicitada, descripcion_libre, articulo(descripcion, unidad_medida)").eq("solicitud_id", id),
     sb.from("guia_despacho").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
@@ -899,15 +903,20 @@ async function vistaExpediente(id) {
     sb.from("cotizacion").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
     sb.from("nota_credito").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
     sb.from("compra").select("n_oc").eq("solicitud_id", id),
+    puedeVerBitacora()
+      ? sb.from("bitacora").select("*").eq("solicitud_id", id).order("id", { ascending: false })
+      : Promise.resolve({ data: [] }),
   ]);
   if (error || !s) { vista().innerHTML = `<div class="card error">No se pudo abrir el expediente: ${error ? error.message : "no existe"}</div>`; return; }
   const especial = s.tipo === "especial";
 
   window._expActual = { s, detalle: detalle || [] };
   const opero = puedeOperar();
-  const factura = (facturas || [])[0] || null;
+  const facturasAnuladas = (facturas || []).filter(f => f.anulado);
+  const factura = (facturas || []).find(f => !f.anulado) || null;
   const facturaDescontada = factura && (comprasSol || []).some(c => c.n_oc === "FACT " + factura.numero);
-  const sumaGuias = (guias || []).reduce((a, g) => ({
+  // Los totales de guías ignoran las anuladas (no cuentan para la factura ni el convenio).
+  const sumaGuias = (guias || []).filter(g => !g.anulado).reduce((a, g) => ({
     neto: a.neto + Number(g.monto_neto || 0),
     iva: a.iva + Number(g.iva || 0),
     bruto: a.bruto + Number(g.monto_bruto || 0),
@@ -991,15 +1000,17 @@ async function vistaExpediente(id) {
       ${(guias || []).length ? `
         <table>
           <tr><th>N°</th><th>Fecha</th><th>Ingreso</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th><th></th></tr>
-          ${guias.map(g => `<tr>
-            <td>${esc(g.numero)}</td>
+          ${guias.map(g => `<tr${g.anulado ? ' class="fila-anulada"' : ''}>
+            <td>${esc(g.numero)}${g.anulado ? ' <span class="pill anulada">anulada</span>' : ''}</td>
             <td>${g.fecha || ""}</td>
             <td>${g.fecha_ingreso || ""}</td>
             <td class="num">${money(g.monto_neto)}</td>
             <td class="num">${money(g.iva)}</td>
             <td class="num">${money(g.monto_bruto)}</td>
             <td>${g.archivo_url ? `<a href="${g.archivo_url}" target="_blank" rel="noopener">ver</a>` : "—"}</td>
-            <td>${esAdminTotal() ? `<button class="secundario" onclick="eliminarGuia('${g.id}','${s.id}')">Eliminar</button>` : ""}</td>
+            <td>${g.anulado
+                  ? `<span class="hint" title="${esc(g.anulado_motivo)}">motivo ⓘ</span>`
+                  : (opero ? `<button class="secundario" onclick="anularGuia('${g.id}','${s.id}')">Anular</button>` : "")}</td>
           </tr>`).join("")}
           <tr>
             <td colspan="3" style="text-align:right;font-weight:700">Totales</td>
@@ -1037,6 +1048,18 @@ async function vistaExpediente(id) {
     <!-- FACTURA -->
     <div class="card">
       <div class="exp-seccion"><h4>Factura</h4>${factura ? `<span class="pill facturada">registrada</span>` : `<span class="hint">pendiente</span>`}</div>
+      ${facturasAnuladas.length ? `
+        <table>
+          <tr><th>Factura anulada</th><th>Fecha</th><th class="num">Bruto</th><th>Motivo</th><th>Anuló</th></tr>
+          ${facturasAnuladas.map(f => `<tr class="fila-anulada">
+            <td>${esc(f.numero)}</td>
+            <td>${f.fecha || ""}</td>
+            <td class="num">${money(f.monto_bruto)}</td>
+            <td>${esc(f.anulado_motivo) || "—"}</td>
+            <td>${_fechaHora(f.anulado_en)}</td>
+          </tr>`).join("")}
+        </table>
+      ` : ""}
       ${factura && editarFacturaId !== factura.id ? `
         <div class="exp-datos">
           <div><div class="d-k">N° factura</div>${esc(factura.numero) || "—"}</div>
@@ -1050,10 +1073,11 @@ async function vistaExpediente(id) {
         ${!facturaDescontada ? `<p class="hint" style="color:var(--warn)">⚠ Esta factura todavía no se descontó del convenio (el Resumen no la refleja).</p>` : ""}
         ${opero ? `
           <div class="acciones">
-            <button class="secundario" onclick="editarFactura('${factura.id}','${s.id}')">Editar</button>
+            ${!facturaDescontada ? `<button class="secundario" onclick="editarFactura('${factura.id}','${s.id}')">Editar</button>` : ""}
             ${!facturaDescontada ? `<button class="secundario" onclick="reintentarDescuentoFactura('${s.id}','${factura.id}')">Reintentar descuento del convenio</button>` : ""}
-            ${esAdminTotal() ? `<button class="secundario" onclick="eliminarFactura('${s.id}','${factura.id}')">Eliminar</button>` : ""}
+            <button class="secundario" onclick="anularFactura('${s.id}','${factura.id}')">Anular${facturaDescontada ? " (revierte el convenio)" : ""}</button>
           </div>
+          ${facturaDescontada ? `<p class="hint">Para corregir un monto: anula esta factura (con motivo) y registra la correcta. Queda todo en la bitácora.</p>` : ""}
         ` : ""}
       ` : (opero ? `
         ${factura ? `<p class="hint">Editando la factura N° ${esc(factura.numero)}. <a href="#" onclick="cancelarEdicionFactura('${s.id}');return false;">Cancelar</a></p>` : ""}
@@ -1076,7 +1100,99 @@ async function vistaExpediente(id) {
     </div>
 
     ${factura ? bloqueNotasCredito(s, factura, notasCredito || [], opero) : ""}
+
+    ${puedeVerBitacora() ? bloqueBitacora(bitacoraRows || []) : ""}
   `;
+}
+
+// ---------- Bitácora (registro inmutable de movimientos) ----------
+function _fechaHora(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  return d.toLocaleDateString("es-CL") + " " +
+         d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+}
+
+const _BITACORA_ACCION = {
+  crear: "creó", editar: "editó", anular: "anuló",
+  cambiar_estado: "cambió estado", descontar_convenio: "descontó del convenio",
+  reversar_convenio: "revirtió del convenio",
+};
+
+// Muestra qué campos cambiaron en un 'editar' (detalle = {antes, despues}).
+function _difBitacora(det) {
+  if (!det || !det.antes || !det.despues) return "";
+  const a = det.antes, b = det.despues, out = [];
+  const omitir = ["anulado", "anulado_por", "anulado_motivo", "anulado_en", "creado_en", "id"];
+  for (const k of Object.keys(b)) {
+    if (omitir.includes(k)) continue;
+    if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) {
+      out.push(`${k}: ${a[k] ?? "—"} → ${b[k] ?? "—"}`);
+    }
+  }
+  return out.join(" · ");
+}
+
+function _filaBitacora(r) {
+  const dif = r.accion === "editar" ? _difBitacora(r.detalle) : "";
+  return `<tr>
+    <td>${_fechaHora(r.ocurrido_en)}</td>
+    <td>${esc(r.actor_nombre) || "—"}</td>
+    <td>${esc(_BITACORA_ACCION[r.accion] || r.accion)} <span class="hint">${esc(r.entidad)}</span></td>
+    <td>${esc(r.motivo) || (dif ? `<span class="b-dif">${esc(dif)}</span>` : "—")}</td>
+    <td class="num">${r.monto ? money(r.monto) : ""}</td>
+  </tr>`;
+}
+
+function bloqueBitacora(rows) {
+  return `
+    <div class="card">
+      <div class="exp-seccion"><h4>Bitácora del expediente</h4><span class="hint">${rows.length} movimiento(s)</span></div>
+      <p class="hint" style="margin-top:0">Registro inmutable: quién creó, editó o anuló cada documento, y los reversos del convenio.</p>
+      ${rows.length ? `
+        <table class="bitacora-lista">
+          <tr><th>Fecha y hora</th><th>Quién</th><th>Acción</th><th>Motivo / cambio</th><th class="num">Monto</th></tr>
+          ${rows.map(_filaBitacora).join("")}
+        </table>
+      ` : `<p class="hint">Todavía no hay movimientos registrados.</p>`}
+    </div>`;
+}
+
+// ---------- Pestaña Bitácora (global, roles de control) ----------
+async function vistaBitacora() {
+  vista().innerHTML = "<div class='card'>Cargando…</div>";
+  const { data: rows, error } = await sb.from("bitacora")
+    .select("*").order("id", { ascending: false }).limit(400);
+  if (error) {
+    vista().innerHTML = `<div class="card error">No se pudo leer la bitácora: ${error.message}
+      <br><small>Falta correr <code>Documentacion/anulacion-y-bitacora.sql</code> en Supabase.</small></div>`;
+    return;
+  }
+  const pintar = (lista) => {
+    document.getElementById("bit-tbody").innerHTML =
+      lista.length ? lista.map(_filaBitacora).join("")
+                   : `<tr><td colspan="5" class="hint">Sin resultados.</td></tr>`;
+    document.getElementById("bit-cuenta").textContent = `${lista.length} de ${(rows || []).length}`;
+  };
+  vista().innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Bitácora de movimientos</h3>
+      <p class="hint">Últimos 400 registros. Filtra por nombre, N° de documento, acción o motivo.</p>
+      <input id="bit-filtro" placeholder="Buscar… (ej: anuló, 45871, Eugenio, dígito)">
+      <p class="hint" id="bit-cuenta"></p>
+      <table class="bitacora-lista">
+        <thead><tr><th>Fecha y hora</th><th>Quién</th><th>Acción</th><th>Motivo / cambio</th><th class="num">Monto</th></tr></thead>
+        <tbody id="bit-tbody"></tbody>
+      </table>
+    </div>`;
+  pintar(rows || []);
+  document.getElementById("bit-filtro").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) { pintar(rows || []); return; }
+    pintar((rows || []).filter(r =>
+      JSON.stringify(r).toLowerCase().includes(q)));
+  });
 }
 
 // ---------- Compra por Mercado Público (solo solicitudes tipo "especial") ----------
@@ -1393,40 +1509,21 @@ async function reintentarDescuentoFactura(solicitudId, facturaId) {
   vistaExpediente(solicitudId);
 }
 
-// Borra del convenio lo que había quedado registrado por una factura (la
-// fila de `compra` con n_oc = "FACT <numero>" y su(s) movimiento_saldo),
-// y recalcula el saldo encadenado del contrato para que quede consistente.
-async function revertirDescuentoFactura(solicitudId, numero) {
-  const { data: compras } = await sb.from("compra").select("id, contrato_id")
-    .eq("solicitud_id", solicitudId).eq("n_oc", "FACT " + numero);
-  if (!compras || !compras.length) return;
+// El reverso del convenio al anular una factura lo hace la función Postgres
+// public.anular_factura() en una sola transacción (ver anularFactura más abajo
+// y Documentacion/anulacion-y-bitacora.sql). Ya no se toca el saldo desde el
+// navegador: nada de borrar movimientos ni recalcular la cadena a mano.
 
-  const compraIds = compras.map(c => c.id);
-  const contratoIds = [...new Set(compras.map(c => c.contrato_id))];
-
-  const { error: errMov } = await sb.from("movimiento_saldo").delete().in("compra_id", compraIds);
-  if (errMov) alert("No se pudo borrar el movimiento anterior del convenio: " + errMov.message);
-
-  const { error: errComp } = await sb.from("compra").delete().in("id", compraIds);
-  if (errComp) alert("No se pudo borrar el registro de compra anterior: " + errComp.message);
-
-  for (const cid of contratoIds) await recalcularSaldoContrato(cid);
+// Pide un motivo obligatorio. Devuelve el texto, o null si el usuario cancela.
+function _pedirMotivo(titulo) {
+  const raw = prompt(titulo + "\n(el motivo queda en la bitácora)");
+  if (raw === null) return null;
+  const motivo = raw.trim();
+  if (!motivo) { alert("El motivo es obligatorio."); return null; }
+  return motivo;
 }
 
-// Recorre los movimientos de un contrato en orden y recalcula saldo_resultante
-// en cadena (por si se borró/editó uno que no era el último).
-async function recalcularSaldoContrato(contratoId) {
-  const { data: movs } = await sb.from("movimiento_saldo").select("id, tipo, monto")
-    .eq("contrato_id", contratoId).order("fecha", { ascending: true });
-  if (!movs || !movs.length) return;
-  let saldo = 0;
-  for (const m of movs) {
-    saldo = m.tipo === "apertura" ? Number(m.monto) : saldo + Number(m.monto);
-    await sb.from("movimiento_saldo").update({ saldo_resultante: saldo }).eq("id", m.id);
-  }
-}
-
-// ---------- Editar / eliminar factura (correcciones de digitación) ----------
+// ---------- Editar / anular factura (correcciones de digitación) ----------
 function editarFactura(facturaId, solicitudId) { editarFacturaId = facturaId; vistaExpediente(solicitudId); }
 function cancelarEdicionFactura(solicitudId) { editarFacturaId = null; vistaExpediente(solicitudId); }
 
@@ -1439,8 +1536,6 @@ async function actualizarFactura(solicitudId, facturaId) {
   const fecha = document.getElementById("fc-fecha").value || null;
   const monto_neto = parseFloat(document.getElementById("fc-neto").value) || 0;
   if (!numero || !fecha || !monto_neto) { errorEl.textContent = "N° de factura, fecha y monto neto son obligatorios."; errorEl.classList.remove("oculto"); return; }
-
-  const { data: facturaAnterior } = await sb.from("factura").select("numero").eq("id", facturaId).single();
 
   const payload = {
     numero, fecha, monto_neto,
@@ -1456,47 +1551,54 @@ async function actualizarFactura(solicitudId, facturaId) {
     payload.archivo_url = url;
   }
 
+  // El botón "Editar" solo aparece si la factura AÚN no se descontó del
+  // convenio, así que aquí no hay saldo que tocar — solo se corrige la fila.
   const { error } = await sb.from("factura").update(payload).eq("id", facturaId);
   if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
-
-  // Borra el descuento viejo del convenio (con el N° anterior) y carga el nuevo
-  // monto — así no queda el valor viejo sumado junto con el nuevo.
-  if (facturaAnterior) await revertirDescuentoFactura(solicitudId, facturaAnterior.numero);
-  await descontarDelConvenio(solicitudId, numero, payload.monto_bruto);
 
   editarFacturaId = null;
   vistaExpediente(solicitudId);
   } finally { _unlock(); }
 }
 
-// Solo admin: elimina la factura y revierte por completo su efecto en el
-// convenio (borra la fila de `compra` y el `movimiento_saldo` que generó).
-async function eliminarFactura(solicitudId, facturaId) {
-  if (!confirm("¿Eliminar esta factura? También se borrará su descuento del convenio. Esta acción no se puede deshacer.")) return;
+// Anula la factura (no se borra) y, si ya estaba descontada, revierte el
+// convenio con un movimiento nuevo. Todo lo hace la función Postgres
+// public.anular_factura() en una transacción; acá solo se pide el motivo
+// y se repone el estado de la solicitud.
+async function anularFactura(solicitudId, facturaId) {
+  const motivo = _pedirMotivo("Motivo de la anulación de la factura (ej: dígito mal ingresado, monto equivocado):");
+  if (!motivo) return;
+  if (!_lock()) return;
+  try {
+    const { error } = await sb.rpc("anular_factura", { p_factura_id: facturaId, p_motivo: motivo });
+    if (error) { alert("No se pudo anular: " + error.message); return; }
 
-  const { data: f } = await sb.from("factura").select("numero").eq("id", facturaId).single();
-  await revertirDescuentoFactura(solicitudId, f?.numero);
+    const { data: guiasRestantes } = await sb.from("guia_despacho")
+      .select("id").eq("solicitud_id", solicitudId).eq("anulado", false);
+    await sb.from("solicitud")
+      .update({ estado: (guiasRestantes && guiasRestantes.length) ? "recibida" : "aprobada" })
+      .eq("id", solicitudId);
 
-  const { error } = await sb.from("factura").delete().eq("id", facturaId);
-  if (error) { alert("No se pudo eliminar la factura: " + error.message); return; }
-
-  const { data: guiasRestantes } = await sb.from("guia_despacho").select("id").eq("solicitud_id", solicitudId);
-  await sb.from("solicitud").update({ estado: (guiasRestantes && guiasRestantes.length) ? "recibida" : "aprobada" }).eq("id", solicitudId);
-
-  vistaExpediente(solicitudId);
+    vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
-// Solo admin: elimina una guía de despacho mal cargada.
-async function eliminarGuia(id, solicitudId) {
-  if (!confirm("¿Eliminar esta guía de despacho?")) return;
-  const { error } = await sb.from("guia_despacho").delete().eq("id", id);
-  if (error) { alert("No se pudo eliminar: " + error.message); return; }
+// Anula una guía de despacho mal cargada (no se borra; queda en la bitácora).
+// La guía no descuenta del convenio, así que basta con marcarla.
+async function anularGuia(id, solicitudId) {
+  const motivo = _pedirMotivo("Motivo de la anulación de la guía (ej: N° o monto mal ingresado):");
+  if (!motivo) return;
+  const { error } = await sb.from("guia_despacho").update({
+    anulado: true, anulado_por: perfilActual.id,
+    anulado_motivo: motivo, anulado_en: new Date().toISOString(),
+  }).eq("id", id);
+  if (error) { alert("No se pudo anular: " + error.message); return; }
   vistaExpediente(solicitudId);
 }
 
 // ---------- Notas de crédito (corrigen una factura ya emitida) ----------
 function bloqueNotasCredito(s, factura, notas, opero) {
-  const totalNC = (notas || []).reduce((a, n) => a + Number(n.monto_bruto || 0), 0);
+  const totalNC = (notas || []).filter(n => !n.anulado).reduce((a, n) => a + Number(n.monto_bruto || 0), 0);
   return `
     <div class="card">
       <div class="exp-seccion"><h4>Notas de crédito</h4><span class="hint">${(notas || []).length} registrada(s)</span></div>
@@ -1504,15 +1606,17 @@ function bloqueNotasCredito(s, factura, notas, opero) {
       ${(notas || []).length ? `
         <table>
           <tr><th>N°</th><th>Fecha</th><th>Motivo</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th><th></th></tr>
-          ${notas.map(n => `<tr>
-            <td>${esc(n.numero)}</td>
+          ${notas.map(n => `<tr${n.anulado ? ' class="fila-anulada"' : ''}>
+            <td>${esc(n.numero)}${n.anulado ? ' <span class="pill anulada">anulada</span>' : ''}</td>
             <td>${n.fecha || ""}</td>
             <td>${esc(n.motivo)}</td>
             <td class="num">${money(n.monto_neto)}</td>
             <td class="num">${money(n.iva)}</td>
             <td class="num">${money(n.monto_bruto)}</td>
             <td>${n.archivo_url ? `<a href="${n.archivo_url}" target="_blank" rel="noopener">ver</a>` : "—"}</td>
-            <td>${esAdminTotal() ? `<button class="secundario" onclick="eliminarNotaCredito('${n.id}','${s.id}')">Eliminar</button>` : ""}</td>
+            <td>${n.anulado
+                  ? `<span class="hint" title="${esc(n.anulado_motivo)}">motivo ⓘ</span>`
+                  : (opero ? `<button class="secundario" onclick="anularNotaCredito('${n.id}','${s.id}')">Anular</button>` : "")}</td>
           </tr>`).join("")}
         </table>
         <div class="totales">
@@ -1572,10 +1676,14 @@ async function guardarNotaCredito(solicitudId, facturaId) {
   } finally { _unlock(); }
 }
 
-async function eliminarNotaCredito(id, solicitudId) {
-  if (!confirm("¿Eliminar esta nota de crédito?")) return;
-  const { error } = await sb.from("nota_credito").delete().eq("id", id);
-  if (error) { alert("No se pudo eliminar: " + error.message); return; }
+async function anularNotaCredito(id, solicitudId) {
+  const motivo = _pedirMotivo("Motivo de la anulación de la nota de crédito:");
+  if (!motivo) return;
+  const { error } = await sb.from("nota_credito").update({
+    anulado: true, anulado_por: perfilActual.id,
+    anulado_motivo: motivo, anulado_en: new Date().toISOString(),
+  }).eq("id", id);
+  if (error) { alert("No se pudo anular: " + error.message); return; }
   vistaExpediente(solicitudId);
 }
 

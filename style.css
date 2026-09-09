@@ -203,6 +203,13 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
 .pill.rechazada{ background:var(--critical-tint); color:var(--critical); }
 .pill.anulada{ background:var(--muted-tint); color:var(--ink-soft); }
 
+/* ---------- FILA / DOCUMENTO ANULADO ---------- */
+tr.fila-anulada > td{ color:var(--ink-soft); text-decoration:line-through; text-decoration-color:var(--ink-soft); }
+tr.fila-anulada > td:last-child{ text-decoration:none; }
+.aviso-anulado{ font-size:.78rem; color:var(--ink-soft); margin:.35rem 0 0; }
+.bitacora-lista td{ vertical-align:top; }
+.bitacora-lista .b-dif{ font-size:.76rem; color:var(--ink-soft); }
+
 /* ---------- FORMULARIOS ---------- */
 label{ display:block; font-size:.85rem; font-weight:600; margin:.9rem 0 .3rem; color:var(--ink); }
 .hint{ font-size:.78rem; color:var(--ink-soft); margin:.3rem 0 0; }
