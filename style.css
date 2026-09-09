@@ -351,6 +351,42 @@ label.chk input[type="checkbox"]{ width:16px; height:16px; flex-shrink:0; accent
   .login-wrapper{ flex-direction:column; gap:30px; }
   .login-card{ width:100%; max-width:420px; }
 }
+
+/* ---------- CELULAR ---------- */
+@media(max-width:640px){
+  /* Encabezado: se apila, se achica, y se oculta el selector "Ver como" */
+  header{ min-height:0; padding:10px 1rem; flex-wrap:wrap; gap:6px 0; }
+  header .marca{ gap:10px; }
+  header .marca h1{ font-size:1rem; }
+  header .logo-header{ width:34px; height:34px; }
+  header .usuario{ width:100%; justify-content:space-between; gap:.5rem; }
+  header .quien{ font-size:.72rem; }
+  header .rol-vista{ display:none; }
+  header #btn-logout{ margin-top:0; }
+
+  main.layout{ padding:0 .7rem; margin:.7rem auto; gap:1rem; }
+  .card{ padding:1rem; border-radius:14px; }
+  h3{ font-size:1.05rem; }
+  h4{ font-size:.95rem; }
+
+  .stat-row{ gap:.7rem; }
+  .stat{ padding:1rem; }
+  .stat .value{ font-size:1.25rem; }
+
+  /* Todos los formularios de detalle a una sola columna (vence al style inline) */
+  .linea-detalle{ grid-template-columns:1fr !important; }
+  .exp-datos{ grid-template-columns:1fr; gap:.7rem; }
+
+  /* Las tablas anchas se desplazan dentro de su tarjeta, no rompen la página */
+  .card:has(table){ overflow-x:auto; }
+  #vista table{ font-size:.82rem; min-width:520px; }
+
+  /* iOS no hace zoom al enfocar si el texto es 16px */
+  input, select, textarea{ font-size:16px; }
+
+  nav.tabs{ border-radius:14px; }
+  nav.tabs .nav-grupo{ width:100%; padding:8px 10px 0; }
+}
 /* ---------- AVISO DE CIERRE POR INACTIVIDAD ---------- */
 .aviso-inactividad{
   position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:999;
