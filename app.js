@@ -10,7 +10,16 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let perfilActual = null; // { id, nombre, rol, unidad_id }
 
 const money = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
-const esc = (v) => String(v ?? "").replace(/"/g, "&quot;");
+// Escapa TODO lo que rompe HTML: se usa tanto para texto dentro de `innerHTML`
+// como para valores de atributos. Sin esto, un campo libre (motivo, ubicación,
+// descripción…) que un solicitante escribe con `<img onerror=…>` corre como
+// script en la sesión de quien abre el expediente (Director, DAF, Alcalde).
+const esc = (v) => String(v ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
 
 // ---------------------------------------------------------------------
 // Arranque
@@ -340,7 +349,7 @@ async function vistaResumen() {
       <div class="stat ${estadoClase}"><div class="stat-ico purple">${ICONOS.percent}</div><div class="label">% usado</div><div class="value">${pct}%</div></div>
     </div>
     <div class="card">
-      <strong>Proveedor:</strong> ${data.proveedor}
+      <strong>Proveedor:</strong> ${esc(data.proveedor)}
     </div>
 
     <div class="card">
@@ -362,6 +371,12 @@ async function vistaResumen() {
       ${svgSolicitudesPorMes(solicitudes || [])}
     </div>
   `;
+
+  // El nombre de unidad NO se mete en un onclick inline (rompería con una
+  // comilla y era vector de inyección): se pasa por data-* y se engancha aquí.
+  vista().querySelectorAll(".bar-click").forEach(el => {
+    el.addEventListener("click", () => vistaExpedientes(el.dataset.unidad));
+  });
 }
 
 // ---------- Gráficos del Resumen (con datos reales de Supabase) ----------
@@ -400,8 +415,8 @@ function htmlBarrasPorUnidad(facturas, solicitudes, topeAnual) {
           const tip = `${nombre}: ${d.solicitudes} solicitud${d.solicitudes === 1 ? "" : "es"} · ${money(d.monto)} facturado` +
                       (topeAnual ? ` · ${pct.toFixed(1)}% del tope anual` : "");
           return `
-          <div class="bar bar-click" title="${esc(tip)}" onclick="vistaExpedientes('${esc(nombre)}')">
-            <span class="b-label">${nombre} <span class="b-count">${d.solicitudes}</span></span>
+          <div class="bar bar-click" title="${esc(tip)}" data-unidad="${esc(nombre)}">
+            <span class="b-label">${esc(nombre)} <span class="b-count">${d.solicitudes}</span></span>
             <span class="b-track"><span class="b-fill" style="width:${Math.max(4, d.monto / max * 100)}%"></span></span>
             <span class="b-val">${money(d.monto)}${topeAnual ? `<small> · ${pct.toFixed(1)}%</small>` : ""}</span>
           </div>`;
@@ -479,7 +494,7 @@ async function vistaNuevaSolicitud() {
       <label>Unidad solicitante</label>
       <select id="ns-unidad">
         <option value="">— selecciona —</option>
-        ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${u.nombre}</option>`).join("")}
+        ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
       </select>
       <label>Responsable del requerimiento</label>
       <input id="ns-solicitante" value="${esc(perfilActual.nombre)}" placeholder="Nombre y cargo">
@@ -576,9 +591,9 @@ function pintarLineas() {
   cont.innerHTML = `<table>
     <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th></th></tr>
     ${lineasSolicitud.map((l, i) => `<tr>
-        <td>${l.descripcion}</td>
+        <td>${esc(l.descripcion)}</td>
         <td class="num">${l.cantidad_solicitada}</td>
-        <td>${l.unidad_medida || "—"}</td>
+        <td>${esc(l.unidad_medida) || "—"}</td>
         <td><button class="secundario" onclick="quitarLinea(${i})">Quitar</button></td>
       </tr>`).join("")}
   </table>`;
@@ -878,10 +893,10 @@ async function vistaSolicitudes() {
         ${data.map(s => `
           <tr>
             <td>${s.fecha_solicitud || ""}</td>
-            <td>${s.unidad?.nombre || ""}${s.obra ? " · " + s.obra.nombre : ""}${s.solicitante ? `<div class="hint">${s.solicitante}</div>` : ""}</td>
+            <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
             <td>
-              ${s.tipo === "especial" ? `<span class="pill enviada">especial</span> ` : ""}${s.motivo || ""}${s.memo_url ? ` · <a href="${s.memo_url}" target="_blank" rel="noopener">documento</a>` : ""}
-              ${s.ubicacion ? `<div class="hint">📍 ${s.ubicacion}</div>` : ""}
+              ${s.tipo === "especial" ? `<span class="pill enviada">especial</span> ` : ""}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
+              ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             <td><span class="pill ${s.estado}">${s.estado}</span></td>
             <td>
@@ -934,7 +949,7 @@ async function vistaExpedientes(filtroUnidad) {
     <div class="card">
       <h3 style="margin-top:0">Expedientes de solicitudes</h3>
       <p class="hint">Cada solicitud reúne su hoja, las guías de despacho y la factura. Haz clic para abrir el expediente.</p>
-      ${filtroUnidad ? `<p class="hint">Filtrado por unidad: <strong>${filtroUnidad}</strong> · <a href="#" onclick="vistaExpedientes();return false;">quitar filtro</a></p>` : ""}
+      ${filtroUnidad ? `<p class="hint">Filtrado por unidad: <strong>${esc(filtroUnidad)}</strong> · <a href="#" onclick="vistaExpedientes();return false;">quitar filtro</a></p>` : ""}
       <table>
         <tr><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Guías</th><th>Factura</th><th class="num">Total bruto</th><th></th></tr>
         ${(sols || []).map(s => {
@@ -944,8 +959,8 @@ async function vistaExpedientes(filtroUnidad) {
                                       : g.reduce((a, x) => a + Number(x.monto_bruto || 0), 0);
           return `<tr>
             <td>${s.fecha_solicitud || ""}</td>
-            <td>${s.unidad?.nombre || ""}</td>
-            <td>${s.tipo === "especial" ? `<span class="pill enviada">especial</span> ` : ""}${s.motivo || ""}</td>
+            <td>${esc(s.unidad?.nombre)}</td>
+            <td>${s.tipo === "especial" ? `<span class="pill enviada">especial</span> ` : ""}${esc(s.motivo)}</td>
             <td><span class="pill ${s.estado}">${s.estado}</span></td>
             <td class="num">${g.length || "—"}</td>
             <td>${f.length ? '<span class="pill facturada">sí</span>' : "—"}</td>
@@ -995,8 +1010,8 @@ async function vistaExpediente(id) {
     <div class="card">
       <div class="exp-cabecera">
         <div>
-          <h3 style="margin:0">Solicitud ${s.n_solicitud ? "N° " + s.n_solicitud : ""}</h3>
-          <div class="hint">${s.fecha_solicitud || ""} · ${s.unidad?.nombre || ""}</div>
+          <h3 style="margin:0">Solicitud ${s.n_solicitud ? "N° " + esc(s.n_solicitud) : ""}</h3>
+          <div class="hint">${s.fecha_solicitud || ""} · ${esc(s.unidad?.nombre)}</div>
         </div>
         <div style="display:flex;gap:.4rem;align-items:center">
           ${especial ? `<span class="pill enviada">especial · Mercado Público</span>` : ""}
@@ -1004,33 +1019,33 @@ async function vistaExpediente(id) {
         </div>
       </div>
       <div class="exp-datos">
-        <div><div class="d-k">Correlativo</div>${s.correlativo || (s.n_solicitud ? "N° " + s.n_solicitud : "—")}</div>
+        <div><div class="d-k">Correlativo</div>${esc(s.correlativo) || (s.n_solicitud ? "N° " + esc(s.n_solicitud) : "—")}</div>
         <div><div class="d-k">Fecha</div>${s.fecha_solicitud || "—"}</div>
-        <div><div class="d-k">Unidad solicitante</div>${s.unidad?.nombre || "—"}</div>
-        <div><div class="d-k">Responsable</div>${s.solicitante || "—"}</div>
-        <div><div class="d-k">Contacto</div>${s.contacto || "—"}</div>
-        <div><div class="d-k">Supervisa ejecución</div>${s.supervisor || "—"}</div>
-        <div><div class="d-k">Ubicación de uso</div>${s.ubicacion || "—"}</div>
+        <div><div class="d-k">Unidad solicitante</div>${esc(s.unidad?.nombre) || "—"}</div>
+        <div><div class="d-k">Responsable</div>${esc(s.solicitante) || "—"}</div>
+        <div><div class="d-k">Contacto</div>${esc(s.contacto) || "—"}</div>
+        <div><div class="d-k">Supervisa ejecución</div>${esc(s.supervisor) || "—"}</div>
+        <div><div class="d-k">Ubicación de uso</div>${esc(s.ubicacion) || "—"}</div>
         <div><div class="d-k">Memo de solicitud</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
         <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Descripción y justificación técnica</h4></div>
       <div class="exp-datos">
-        <div><div class="d-k">Qué se solicita</div>${s.descripcion_requerimiento || "—"}</div>
-        <div><div class="d-k">Fundamento / motivo</div>${s.motivo || "—"}</div>
-        <div><div class="d-k">Situación actual</div>${s.situacion_actual || "—"}</div>
-        <div><div class="d-k">Trabajo a ejecutar</div>${s.trabajo_ejecutar || "—"}</div>
-        <div><div class="d-k">Beneficio público</div>${s.beneficio_publico || "—"}</div>
+        <div><div class="d-k">Qué se solicita</div>${esc(s.descripcion_requerimiento) || "—"}</div>
+        <div><div class="d-k">Fundamento / motivo</div>${esc(s.motivo) || "—"}</div>
+        <div><div class="d-k">Situación actual</div>${esc(s.situacion_actual) || "—"}</div>
+        <div><div class="d-k">Trabajo a ejecutar</div>${esc(s.trabajo_ejecutar) || "—"}</div>
+        <div><div class="d-k">Beneficio público</div>${esc(s.beneficio_publico) || "—"}</div>
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Materiales solicitados</h4></div>
       <table>
         <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th></tr>
         ${(detalle || []).map(d => `<tr>
-          <td>${d.articulo?.descripcion || d.descripcion_libre || ""}</td>
+          <td>${esc(d.articulo?.descripcion || d.descripcion_libre)}</td>
           <td class="num">${d.cantidad_solicitada}</td>
-          <td>${d.unidad_medida_libre || d.articulo?.unidad_medida || "—"}</td>
+          <td>${esc(d.unidad_medida_libre || d.articulo?.unidad_medida) || "—"}</td>
         </tr>`).join("")}
       </table>
 
@@ -1040,7 +1055,7 @@ async function vistaExpediente(id) {
           s.resp_fotografico ? `Respaldo fotográfico${s.num_fotos ? ` (${s.num_fotos} fotos)` : ""}` : null,
           s.resp_informe_tecnico ? "Informe técnico / cubicación" : null,
           s.resp_presupuesto ? "Presupuesto estimativo" : null,
-          s.resp_otro ? `Otro: ${s.resp_otro_texto || ""}` : null,
+          s.resp_otro ? `Otro: ${esc(s.resp_otro_texto)}` : null,
           s.cdp_negativo ? "⚠ CDP negativo" : null,
           especial ? "⚠ Producto fuera de catálogo" : null,
         ].filter(Boolean).join(" · ") || "Sin respaldos marcados."}
@@ -1066,7 +1081,7 @@ async function vistaExpediente(id) {
         <table>
           <tr><th>N°</th><th>Fecha</th><th>Ingreso</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th><th></th></tr>
           ${guias.map(g => `<tr>
-            <td>${g.numero || ""}</td>
+            <td>${esc(g.numero)}</td>
             <td>${g.fecha || ""}</td>
             <td>${g.fecha_ingreso || ""}</td>
             <td class="num">${money(g.monto_neto)}</td>
@@ -1113,7 +1128,7 @@ async function vistaExpediente(id) {
       <div class="exp-seccion"><h4>Factura</h4>${factura ? `<span class="pill facturada">registrada</span>` : `<span class="hint">pendiente</span>`}</div>
       ${factura && editarFacturaId !== factura.id ? `
         <div class="exp-datos">
-          <div><div class="d-k">N° factura</div>${factura.numero || "—"}</div>
+          <div><div class="d-k">N° factura</div>${esc(factura.numero) || "—"}</div>
           <div><div class="d-k">Fecha</div>${factura.fecha || "—"}</div>
           <div><div class="d-k">Neto</div>${money(factura.monto_neto)}</div>
           <div><div class="d-k">IVA</div>${money(factura.iva)}</div>
@@ -1126,11 +1141,11 @@ async function vistaExpediente(id) {
           <div class="acciones">
             <button class="secundario" onclick="editarFactura('${factura.id}','${s.id}')">Editar</button>
             ${!facturaDescontada ? `<button class="secundario" onclick="reintentarDescuentoFactura('${s.id}','${factura.id}')">Reintentar descuento del convenio</button>` : ""}
-            ${esAdminTotal() ? `<button class="secundario" onclick="eliminarFactura('${s.id}','${factura.id}','${esc(factura.numero)}')">Eliminar</button>` : ""}
+            ${esAdminTotal() ? `<button class="secundario" onclick="eliminarFactura('${s.id}','${factura.id}')">Eliminar</button>` : ""}
           </div>
         ` : ""}
       ` : (opero ? `
-        ${factura ? `<p class="hint">Editando la factura N° ${factura.numero || ""}. <a href="#" onclick="cancelarEdicionFactura('${s.id}');return false;">Cancelar</a></p>` : ""}
+        ${factura ? `<p class="hint">Editando la factura N° ${esc(factura.numero)}. <a href="#" onclick="cancelarEdicionFactura('${s.id}');return false;">Cancelar</a></p>` : ""}
         <div class="linea-detalle" style="grid-template-columns:1fr 1fr 1fr">
           <div><label>N° factura</label><input id="fc-num" value="${factura ? esc(factura.numero) : ""}" placeholder="Ej: 45871"></div>
           <div><label>Fecha</label><input id="fc-fecha" type="date" value="${factura ? (factura.fecha || "") : ""}"></div>
@@ -1163,8 +1178,8 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
         <table>
           <tr><th>Proveedor</th><th>N°</th><th>Fecha</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th></tr>
           ${cotizaciones.map(c => `<tr>
-            <td>${c.proveedor || ""}</td>
-            <td>${c.numero || ""}</td>
+            <td>${esc(c.proveedor)}</td>
+            <td>${esc(c.numero)}</td>
             <td>${c.fecha || ""}</td>
             <td class="num">${money(c.monto_neto)}</td>
             <td class="num">${money(c.iva)}</td>
@@ -1200,12 +1215,12 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
       <p class="hint">Con la cotización en mano, arma la resolución/decreto que autoriza el gasto y
         genera la orden de compra en Mercado Público antes de pedir el despacho.</p>
       <div class="exp-datos">
-        <div><div class="d-k">N° decreto</div>${s.n_decreto || "—"}</div>
+        <div><div class="d-k">N° decreto</div>${esc(s.n_decreto) || "—"}</div>
         <div><div class="d-k">Fecha decreto</div>${s.fecha_decreto || "—"}</div>
-        <div><div class="d-k">Decreto</div>${s.decreto_url ? `<a href="${s.decreto_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
-        <div><div class="d-k">N° orden de compra</div>${s.n_orden_compra || "—"}</div>
+        <div><div class="d-k">Decreto</div>${s.decreto_url ? `<a href="${esc(s.decreto_url)}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">N° orden de compra</div>${esc(s.n_orden_compra) || "—"}</div>
         <div><div class="d-k">Fecha OC</div>${s.fecha_oc || "—"}</div>
-        <div><div class="d-k">Orden de compra</div>${s.oc_url ? `<a href="${s.oc_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Orden de compra</div>${s.oc_url ? `<a href="${esc(s.oc_url)}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
       </div>
 
       ${opero ? `
@@ -1527,10 +1542,11 @@ async function actualizarFactura(solicitudId, facturaId) {
 
 // Solo admin: elimina la factura y revierte por completo su efecto en el
 // convenio (borra la fila de `compra` y el `movimiento_saldo` que generó).
-async function eliminarFactura(solicitudId, facturaId, numero) {
+async function eliminarFactura(solicitudId, facturaId) {
   if (!confirm("¿Eliminar esta factura? También se borrará su descuento del convenio. Esta acción no se puede deshacer.")) return;
 
-  await revertirDescuentoFactura(solicitudId, numero);
+  const { data: f } = await sb.from("factura").select("numero").eq("id", facturaId).single();
+  await revertirDescuentoFactura(solicitudId, f?.numero);
 
   const { error } = await sb.from("factura").delete().eq("id", facturaId);
   if (error) { alert("No se pudo eliminar la factura: " + error.message); return; }
@@ -1560,9 +1576,9 @@ function bloqueNotasCredito(s, factura, notas, opero) {
         <table>
           <tr><th>N°</th><th>Fecha</th><th>Motivo</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th><th></th></tr>
           ${notas.map(n => `<tr>
-            <td>${n.numero || ""}</td>
+            <td>${esc(n.numero)}</td>
             <td>${n.fecha || ""}</td>
-            <td>${n.motivo || ""}</td>
+            <td>${esc(n.motivo)}</td>
             <td class="num">${money(n.monto_neto)}</td>
             <td class="num">${money(n.iva)}</td>
             <td class="num">${money(n.monto_bruto)}</td>
@@ -1757,8 +1773,8 @@ async function vistaConvenio() {
         <table>
           <tr><th>Proveedor</th><th>N° lic.</th><th class="num">Tope</th><th>Vigencia</th><th>Estado</th></tr>
           ${contratos.slice(1).map(x => `<tr>
-            <td>${x.proveedor || ""}</td>
-            <td>${x.n_licitacion || ""}</td>
+            <td>${esc(x.proveedor)}</td>
+            <td>${esc(x.n_licitacion)}</td>
             <td class="num">${money(x.monto_tope_anual)}</td>
             <td>${x.fecha_inicio || "?"} → ${x.fecha_termino || "?"}</td>
             <td><span class="pill ${x.estado === "vigente" ? "aprobada" : "anulada"}">${x.estado}</span></td>
@@ -1842,8 +1858,8 @@ async function vistaCatalogo() {
         <tbody>
           ${(articulos || []).map(a => `
             <tr data-id="${a.id}">
-              <td><input class="ca-r-desc" value="${(a.descripcion || "").replace(/"/g, "&quot;")}"></td>
-              <td><input class="ca-r-um" value="${(a.unidad_medida || "").replace(/"/g, "&quot;")}"></td>
+              <td><input class="ca-r-desc" value="${esc(a.descripcion)}"></td>
+              <td><input class="ca-r-um" value="${esc(a.unidad_medida)}"></td>
               <td><button class="secundario ca-guardar">Guardar</button></td>
             </tr>
           `).join("")}
@@ -1908,7 +1924,7 @@ async function vistaUsuarios() {
   const opcionesRol = (sel) => Object.entries(ROLES)
     .map(([v, t]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${t}</option>`).join("");
   const opcionesUnidad = (sel) => `<option value="">— sin unidad —</option>` +
-    (unidades || []).map(u => `<option value="${u.id}" ${u.id === sel ? "selected" : ""}>${u.nombre}</option>`).join("");
+    (unidades || []).map(u => `<option value="${u.id}" ${u.id === sel ? "selected" : ""}>${esc(u.nombre)}</option>`).join("");
 
   vista().innerHTML = `
     <div class="card">
@@ -1921,7 +1937,7 @@ async function vistaUsuarios() {
         <tbody>
           ${(perfiles || []).map(p => `
             <tr data-id="${p.id}">
-              <td>${p.nombre || "(sin nombre)"}${p.id === perfilActual.id ? " <span class='hint'>(tú)</span>" : ""}</td>
+              <td>${esc(p.nombre) || "(sin nombre)"}${p.id === perfilActual.id ? " <span class='hint'>(tú)</span>" : ""}</td>
               <td><select class="u-rol">${opcionesRol(p.rol)}</select></td>
               <td><select class="u-unidad">${opcionesUnidad(p.unidad_id)}</select></td>
               <td>${p.debe_cambiar_clave
