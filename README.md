@@ -513,6 +513,24 @@ end $$;
 > `trg_compra_movimiento` crea el `movimiento_saldo` que alimenta la vista
 > `resumen_convenio`. Necesita un `contrato` con `estado = 'vigente'`.
 
+## Anulación de documentos + Bitácora
+
+Las facturas, guías de despacho y notas de crédito **ya no se borran**: se
+**anulan** con un motivo obligatorio (queda la fila y su historia). Al anular
+una **factura**, su descuento del convenio se revierte con un movimiento
+`reverso` nuevo — el original no se toca. Todo queda en la tabla `bitacora`
+(append-only, la escriben solo triggers `security definer`).
+
+- **Pestaña "Bitácora"** y panel dentro del expediente: visibles para `admin`,
+  `lector_operativo` (Director de Obras) y `lector_pagos` (DAF).
+- El botón **"Anular"** (factura/guía/NC) lo ven `admin` y `admin_ito`.
+
+Correr **una vez** en el SQL Editor: el archivo completo
+`Documentacion/anulacion-y-bitacora.sql` (está envuelto en `begin/commit`,
+es atómico). Verificado contra el esquema real: `resumen_convenio` suma
+`monto` y el `reverso` guarda `+monto_bruto`, así que **la vista no se toca**.
+Prueba al final del archivo.
+
 ## Qué falta para una v2 (no bloquea el piloto)
 
 - Total estimado al pie de la solicitud (hoy no hay precios en esa etapa,
