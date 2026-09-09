@@ -9,6 +9,13 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let perfilActual = null; // { id, nombre, rol, unidad_id }
 
+// Anti doble-clic: mientras un guardado está en vuelo, ignora cualquier
+// otro. Sin esto, dos clics seguidos en "Guardar" insertan dos guías /
+// dos facturas / dos descuentos del convenio.
+let _enviando = false;
+const _lock = () => (_enviando ? false : (_enviando = true));
+const _unlock = () => { _enviando = false; };
+
 const money = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
 // Escapa TODO lo que rompe HTML: se usa tanto para texto dentro de `innerHTML`
 // como para valores de atributos. Sin esto, un campo libre (motivo, ubicación,
@@ -663,6 +670,8 @@ async function leerFormularioPDF(file) {
 }
 
 async function guardarSolicitud() {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("ns-error");
   const mostrarError = (msg) => { errorEl.textContent = msg; errorEl.classList.remove("oculto"); };
   errorEl.classList.add("oculto");
@@ -743,6 +752,7 @@ async function guardarSolicitud() {
       : `Una vez aprobada, descarga la hoja desde <strong>Expedientes</strong> para enviarla a la empresa.`}
     </p>
   </div>`;
+  } finally { _unlock(); }
 }
 
 // ---------------------------------------------------------------------
@@ -1157,6 +1167,8 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
 }
 
 async function guardarJustificacionesEspecial(solicitudId, conCdp) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("jj-error");
   const okEl = document.getElementById("jj-ok");
   errorEl.classList.add("oculto"); okEl.classList.add("oculto");
@@ -1187,9 +1199,12 @@ async function guardarJustificacionesEspecial(solicitudId, conCdp) {
   } catch (e) {
     errorEl.textContent = e.message; errorEl.classList.remove("oculto");
   }
+  } finally { _unlock(); }
 }
 
 async function guardarCotizacion(solicitudId) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("ct-error");
   errorEl.classList.add("oculto");
   const proveedor = document.getElementById("ct-prov").value.trim();
@@ -1212,9 +1227,12 @@ async function guardarCotizacion(solicitudId) {
   });
   if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
   vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
 async function guardarDocumentacionEspecial(solicitudId) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("dc-error");
   const okEl = document.getElementById("dc-ok");
   errorEl.classList.add("oculto"); okEl.classList.add("oculto");
@@ -1237,6 +1255,7 @@ async function guardarDocumentacionEspecial(solicitudId) {
   if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
   okEl.textContent = "Guardado."; okEl.classList.remove("oculto");
   vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
 function hoyISO() { return new Date().toISOString().slice(0, 10); }
@@ -1253,6 +1272,8 @@ async function avanzarEstado(id, estado) {
 }
 
 async function guardarGuia(solicitudId) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("gd-error");
   errorEl.classList.add("oculto");
   const numero = document.getElementById("gd-num").value.trim();
@@ -1279,9 +1300,12 @@ async function guardarGuia(solicitudId) {
     await sb.from("solicitud").update({ estado: "recibida" }).eq("id", solicitudId);
   }
   vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
 async function guardarFactura(solicitudId) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("fc-error");
   errorEl.classList.add("oculto");
   const numero = document.getElementById("fc-num").value.trim();
@@ -1306,6 +1330,7 @@ async function guardarFactura(solicitudId) {
   await sb.from("solicitud").update({ estado: "facturada" }).eq("id", solicitudId);
   await descontarDelConvenio(solicitudId, numero, monto_bruto);
   vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
 // Descuenta del saldo del convenio: registra la factura en `compra` con su
@@ -1378,6 +1403,8 @@ function editarFactura(facturaId, solicitudId) { editarFacturaId = facturaId; vi
 function cancelarEdicionFactura(solicitudId) { editarFacturaId = null; vistaExpediente(solicitudId); }
 
 async function actualizarFactura(solicitudId, facturaId) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("fc-error");
   errorEl.classList.add("oculto");
   const numero = document.getElementById("fc-num").value.trim();
@@ -1411,6 +1438,7 @@ async function actualizarFactura(solicitudId, facturaId) {
 
   editarFacturaId = null;
   vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
 // Solo admin: elimina la factura y revierte por completo su efecto en el
@@ -1490,6 +1518,8 @@ function bloqueNotasCredito(s, factura, notas, opero) {
 }
 
 async function guardarNotaCredito(solicitudId, facturaId) {
+  if (!_lock()) return;
+  try {
   const errorEl = document.getElementById("nc-error");
   errorEl.classList.add("oculto");
   const fecha = document.getElementById("nc-fecha").value || null;
@@ -1511,6 +1541,7 @@ async function guardarNotaCredito(solicitudId, facturaId) {
   });
   if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
   vistaExpediente(solicitudId);
+  } finally { _unlock(); }
 }
 
 async function eliminarNotaCredito(id, solicitudId) {
