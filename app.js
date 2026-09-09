@@ -476,7 +476,7 @@ let lineasSolicitud = [];
 
 async function vistaNuevaSolicitud() {
   const [{ data: articulos }, { data: unidades }] = await Promise.all([
-    sb.from("articulo").select("descripcion, unidad_medida").order("descripcion"),
+    sb.from("articulo").select("id, descripcion, unidad_medida").order("descripcion"),
     sb.from("unidad").select("id, nombre").order("nombre"),
   ]);
   lineasSolicitud = [];
@@ -528,11 +528,12 @@ async function vistaNuevaSolicitud() {
       <p class="hint">Solo material y cantidad. Los valores llegan después en las guías de despacho.</p>
       <div id="ns-lineas"></div>
       <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr auto">
-        <div><label>Material</label><input id="ns-mat" list="ns-catalogo" placeholder="Nombre del material"></div>
+        <div><label>Material</label><input id="ns-mat" list="ns-catalogo" placeholder="Elige del catálogo" autocomplete="off"></div>
         <div><label>Cantidad</label><input id="ns-cant" type="number" min="0" step="0.01"></div>
         <div><label>Unidad</label><input id="ns-um" placeholder="un, m, kg, saco…"></div>
         <div><button class="secundario" id="ns-agregar" style="margin-top:0">+ Agregar</button></div>
       </div>
+      <p class="hint" id="ns-um-hint" style="margin-top:.3rem">La unidad de medida la fija el catálogo (bases técnicas del convenio) al elegir el material.</p>
       <datalist id="ns-catalogo">${(articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("")}</datalist>
 
       <h4>4. Respaldos adjuntos</h4>
@@ -566,16 +567,43 @@ async function vistaNuevaSolicitud() {
     </div>
   `;
 
+  // Catálogo por descripción (normalizada) → { id, unidad_medida }. La unidad
+  // de medida viene de las bases técnicas del convenio: al elegir un material
+  // del catálogo se rellena sola y el campo queda bloqueado. Si el material
+  // no está en el catálogo (solicitud "especial"), queda editable a mano.
+  const catalogoPorDesc = new Map(
+    (articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a])
+  );
+  const matInput = document.getElementById("ns-mat");
+  const umInput = document.getElementById("ns-um");
+  const sincronizarUM = () => {
+    const art = catalogoPorDesc.get(matInput.value.trim().toLowerCase());
+    if (art && art.unidad_medida) {
+      umInput.value = art.unidad_medida;
+      umInput.readOnly = true;
+      umInput.style.background = "var(--surface-2)";
+      umInput.title = "Unidad definida en el catálogo (bases técnicas del convenio)";
+    } else {
+      umInput.readOnly = false;
+      umInput.style.background = "";
+      umInput.title = "";
+    }
+  };
+  matInput.addEventListener("input", sincronizarUM);
+
   document.getElementById("ns-agregar").addEventListener("click", () => {
     const mat = document.getElementById("ns-mat").value.trim();
     const cant = parseFloat(document.getElementById("ns-cant").value);
     if (!mat || !cant) return;
+    const art = catalogoPorDesc.get(mat.toLowerCase());
     lineasSolicitud.push({
       descripcion: mat,
+      articulo_id: art ? art.id : null,
       cantidad_solicitada: cant,
-      unidad_medida: document.getElementById("ns-um").value.trim(),
+      unidad_medida: (art ? art.unidad_medida : document.getElementById("ns-um").value.trim()) || "",
     });
     ["ns-mat", "ns-cant", "ns-um"].forEach(id => document.getElementById(id).value = "");
+    sincronizarUM();
     pintarLineas();
   });
 
@@ -734,7 +762,7 @@ async function guardarSolicitud() {
 
   const detalle = lineasSolicitud.map(l => ({
     solicitud_id: solicitud.id,
-    articulo_id: null,
+    articulo_id: l.articulo_id || null,
     descripcion_libre: l.descripcion,
     unidad_medida_libre: l.unidad_medida || null,
     cantidad_solicitada: l.cantidad_solicitada,
