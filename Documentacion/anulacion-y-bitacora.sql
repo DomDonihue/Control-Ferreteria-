@@ -33,6 +33,35 @@
 begin;
 
 -- =====================================================================
+-- BLOQUE 0 — Prerrequisitos (por si algún bloque del README no se corrió)
+-- =====================================================================
+-- nota_credito: la usa la pestaña "Notas de crédito" del expediente. Si nunca
+-- se creó, se crea aquí con su RLS. (Si ya existe, no pasa nada.)
+create table if not exists nota_credito (
+  id           uuid primary key default gen_random_uuid(),
+  solicitud_id uuid not null references solicitud(id) on delete cascade,
+  factura_id   uuid references factura(id) on delete set null,
+  numero       text,
+  fecha        date not null,
+  motivo       text,
+  monto_neto   numeric not null default 0,
+  iva          numeric not null default 0,
+  monto_bruto  numeric not null default 0,
+  archivo_url  text,
+  creado_por   uuid references perfiles(id),
+  creado_en    timestamptz not null default now()
+);
+alter table nota_credito enable row level security;
+drop policy if exists "nc lectura" on nota_credito;
+drop policy if exists "nc crea"    on nota_credito;
+drop policy if exists "nc edita"   on nota_credito;
+create policy "nc lectura" on nota_credito for select using (auth.role() = 'authenticated');
+create policy "nc crea"    on nota_credito for insert with check (public.rol_actual() in ('admin','admin_ito'));
+create policy "nc edita"   on nota_credito for update
+  using (public.rol_actual() in ('admin','admin_ito')) with check (public.rol_actual() in ('admin','admin_ito'));
+grant select, insert, update, delete on nota_credito to authenticated;
+
+-- =====================================================================
 -- BLOQUE 1 — Columnas de anulación en los documentos del expediente
 -- (seguro de correr ya)
 -- =====================================================================
