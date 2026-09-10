@@ -525,8 +525,6 @@ async function vistaNuevaSolicitud() {
       <textarea id="ns-situacion" rows="2"></textarea>
       <label>Trabajo a ejecutar</label>
       <textarea id="ns-trabajo" rows="2"></textarea>
-      <label>Beneficio público esperado</label>
-      <textarea id="ns-beneficio" rows="2"></textarea>
 
       <h4>3. Detalle de materiales solicitados</h4>
       <p class="hint">Solo material y cantidad. Los valores llegan después en las guías de despacho.</p>
@@ -663,7 +661,6 @@ async function leerFormularioPDF(file) {
     set("ns-motivo", T("fundamento"));
     set("ns-situacion", T("situacion_actual"));
     set("ns-trabajo", T("trabajo_ejecutar"));
-    set("ns-beneficio", T("beneficio_publico"));
 
     // unidad solicitante: intenta calzar por nombre
     const unTxt = T("unidad_solicitante").toLowerCase();
@@ -744,7 +741,6 @@ async function guardarSolicitud() {
     descripcion_requerimiento: descripcion_requerimiento || null,
     situacion_actual: situacion_actual || null,
     trabajo_ejecutar: val("ns-trabajo") || null,
-    beneficio_publico: val("ns-beneficio") || null,
     resp_fotografico: document.getElementById("ns-resp-foto").checked || !!rFoto.url,
     num_fotos: parseInt(document.getElementById("ns-num-fotos").value) || null,
     resp_informe_tecnico: document.getElementById("ns-resp-informe").checked,
@@ -956,7 +952,6 @@ async function vistaExpediente(id) {
         <div><div class="d-k">Fundamento / motivo</div>${esc(s.motivo) || "—"}</div>
         <div><div class="d-k">Situación actual</div>${esc(s.situacion_actual) || "—"}</div>
         <div><div class="d-k">Trabajo a ejecutar</div>${esc(s.trabajo_ejecutar) || "—"}</div>
-        <div><div class="d-k">Beneficio público</div>${esc(s.beneficio_publico) || "—"}</div>
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Materiales solicitados</h4></div>
@@ -1725,7 +1720,6 @@ function descargarHojaPDF() {
   fila("Fundamento / motivo:", s.motivo || "");
   fila("Situación actual:", s.situacion_actual || "");
   fila("Trabajo a ejecutar:", s.trabajo_ejecutar || "");
-  fila("Beneficio público:", s.beneficio_publico || "");
 
   y += 4;
   if (y > 250) { doc.addPage(); y = M; }
