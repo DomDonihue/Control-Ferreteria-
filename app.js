@@ -477,6 +477,7 @@ function svgSolicitudesPorMes(solicitudes) {
 // sección 5. Se puede cargar el PDF editable y autocompletar.
 // =====================================================================
 let lineasSolicitud = [];
+let catalogoPorDesc = new Map(); // descripción normalizada → fila de `articulo` (para autocompletar unidad/artículo)
 
 async function vistaNuevaSolicitud() {
   const [{ data: articulos }, { data: unidades }] = await Promise.all([
@@ -529,13 +530,11 @@ async function vistaNuevaSolicitud() {
       <h4>3. Detalle de materiales solicitados</h4>
       <p class="hint">Solo material y cantidad. Los valores llegan después en las guías de despacho.</p>
       <div id="ns-lineas"></div>
-      <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr auto">
+      <div class="linea-detalle" style="grid-template-columns:3fr 1fr auto">
         <div><label>Material</label><input id="ns-mat" list="ns-catalogo" placeholder="Elige del catálogo" autocomplete="off"></div>
         <div><label>Cantidad</label><input id="ns-cant" type="number" min="0" step="0.01"></div>
-        <div><label>Unidad</label><input id="ns-um" placeholder="un, m, kg, saco…"></div>
         <div><button class="secundario" id="ns-agregar" style="margin-top:0">+ Agregar</button></div>
       </div>
-      <p class="hint" id="ns-um-hint" style="margin-top:.3rem">La unidad de medida la fija el catálogo (bases técnicas del convenio) al elegir el material.</p>
       <datalist id="ns-catalogo">${(articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("")}</datalist>
 
       <h4>4. Respaldos adjuntos</h4>
@@ -569,29 +568,14 @@ async function vistaNuevaSolicitud() {
     </div>
   `;
 
-  // Catálogo por descripción (normalizada) → { id, unidad_medida }. La unidad
-  // de medida viene de las bases técnicas del convenio: al elegir un material
-  // del catálogo se rellena sola y el campo queda bloqueado. Si el material
-  // no está en el catálogo (solicitud "especial"), queda editable a mano.
-  const catalogoPorDesc = new Map(
+  // Catálogo por descripción (normalizada). Quien solicita solo elige material
+  // y cantidad; la unidad de medida NO se le pide (no tiene por qué saberla) —
+  // si el material está en el catálogo, se guarda en silencio la unidad de las
+  // bases técnicas para que aparezca después en el expediente y en la hoja
+  // que se envía a la empresa.
+  catalogoPorDesc = new Map(
     (articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a])
   );
-  const matInput = document.getElementById("ns-mat");
-  const umInput = document.getElementById("ns-um");
-  const sincronizarUM = () => {
-    const art = catalogoPorDesc.get(matInput.value.trim().toLowerCase());
-    if (art && art.unidad_medida) {
-      umInput.value = art.unidad_medida;
-      umInput.readOnly = true;
-      umInput.style.background = "var(--surface-2)";
-      umInput.title = "Unidad definida en el catálogo (bases técnicas del convenio)";
-    } else {
-      umInput.readOnly = false;
-      umInput.style.background = "";
-      umInput.title = "";
-    }
-  };
-  matInput.addEventListener("input", sincronizarUM);
 
   document.getElementById("ns-agregar").addEventListener("click", () => {
     const mat = document.getElementById("ns-mat").value.trim();
@@ -602,10 +586,9 @@ async function vistaNuevaSolicitud() {
       descripcion: mat,
       articulo_id: art ? art.id : null,
       cantidad_solicitada: cant,
-      unidad_medida: (art ? art.unidad_medida : document.getElementById("ns-um").value.trim()) || "",
+      unidad_medida: (art && art.unidad_medida) || "",
     });
-    ["ns-mat", "ns-cant", "ns-um"].forEach(id => document.getElementById(id).value = "");
-    sincronizarUM();
+    ["ns-mat", "ns-cant"].forEach(id => document.getElementById(id).value = "");
     pintarLineas();
   });
 
@@ -626,11 +609,10 @@ function pintarLineas() {
     return;
   }
   cont.innerHTML = `<table>
-    <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th><th></th></tr>
+    <tr><th>Material</th><th class="num">Cantidad</th><th></th></tr>
     ${lineasSolicitud.map((l, i) => `<tr>
         <td>${esc(l.descripcion)}</td>
         <td class="num">${l.cantidad_solicitada}</td>
-        <td>${esc(l.unidad_medida) || "—"}</td>
         <td><button class="secundario" onclick="quitarLinea(${i})">Quitar</button></td>
       </tr>`).join("")}
   </table>`;
@@ -673,10 +655,12 @@ async function leerFormularioPDF(file) {
     for (let r = 0; r < 5; r++) {
       const mat = T(`mat_r${r}_c0`);
       if (!mat) continue;
+      const art = catalogoPorDesc.get(mat.trim().toLowerCase());
       lineasSolicitud.push({
         descripcion: mat,
+        articulo_id: art ? art.id : null,
         cantidad_solicitada: num(T(`mat_r${r}_c1`)),
-        unidad_medida: T(`mat_r${r}_c2`),
+        unidad_medida: (art && art.unidad_medida) || T(`mat_r${r}_c2`) || "",
       });
     }
     pintarLineas();
