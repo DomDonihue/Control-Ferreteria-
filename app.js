@@ -115,6 +115,53 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
   location.reload();
 });
 
+document.getElementById("notif-badge").addEventListener("click", () => {
+  irATab(document.getElementById("notif-badge").dataset.ir);
+});
+
+// ---------------------------------------------------------------------
+// Aviso "en la app" de lo pendiente para el rol de cada uno (sin correo):
+// al Director le avisa cuántas solicitudes esperan su V°B°, al ITO cuántas
+// ya están aprobadas y listas para tramitar con la empresa. Se recalcula al
+// entrar, cada 90 s, y después de aprobar/rechazar o ingresar una solicitud.
+// ---------------------------------------------------------------------
+let _timerNotif = null;
+
+function iniciarNotificaciones() {
+  actualizarNotificaciones();
+  if (_timerNotif) return;
+  _timerNotif = setInterval(actualizarNotificaciones, 90000);
+}
+
+async function actualizarNotificaciones() {
+  const btn = document.getElementById("notif-badge");
+  if (!btn || !perfilActual) return;
+  const rol = rolEfectivo();
+  const partes = [];
+  try {
+    if (["admin", "lector_operativo"].includes(rol)) {
+      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "pendiente");
+      if (count) partes.push({ n: count, texto: `${count} solicitud${count === 1 ? "" : "es"} esperando tu V°B°`, ir: "solicitudes" });
+    }
+    if (["admin", "admin_ito"].includes(rol)) {
+      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "aprobada");
+      if (count) partes.push({ n: count, texto: `${count} aprobada${count === 1 ? "" : "s"}, lista${count === 1 ? "" : "s"} para tramitar con la empresa`, ir: "expedientes" });
+    }
+  } catch {
+    return; // sin conexión momentánea: no molesta, se reintenta solo
+  }
+  if (!partes.length) { btn.classList.add("oculto"); return; }
+  btn.textContent = `🔔 ${partes.reduce((a, p) => a + p.n, 0)}`;
+  btn.title = partes.map(p => p.texto).join(" · ");
+  btn.dataset.ir = partes[0].ir;
+  btn.classList.remove("oculto");
+}
+
+// Simula el clic en la pestaña del menú (los botones se arman en armarTabs()).
+function irATab(id) {
+  document.querySelector(`#tabs button[data-tab-id="${id}"]`)?.click();
+}
+
 async function cargarPerfilYArmarApp(user) {
   let { data: perfil } = await sb.from("perfiles").select("*").eq("id", user.id).maybeSingle();
 
@@ -143,6 +190,7 @@ async function cargarPerfilYArmarApp(user) {
   montarSelectorRolVista();
   _ultimaActividad = Date.now();
   iniciarControlInactividad();
+  iniciarNotificaciones();
 
   // Clave provisoria: al primer ingreso obliga a cambiarla antes de seguir.
   if (perfil.debe_cambiar_clave) {
@@ -320,6 +368,7 @@ function armarTabs() {
     }
     const btn = document.createElement("button");
     btn.className = i === 0 ? "activo" : "";
+    btn.dataset.tabId = tab.id;
     btn.innerHTML = `<span class="nav-ico">${ICONOS[tab.icono] || ""}</span><span>${tab.label}</span>`;
     btn.addEventListener("click", () => {
       nav.querySelectorAll("button").forEach(b => b.classList.remove("activo"));
@@ -754,6 +803,7 @@ async function guardarSolicitud() {
   const { error: errorDetalle } = await sb.from("solicitud_detalle").insert(detalle);
   if (errorDetalle) { mostrarError(errorDetalle.message); return; }
 
+  actualizarNotificaciones();
   vista().innerHTML = `<div class="card">
     <h3 style="margin-top:0">Solicitud ingresada${fuera_catalogo ? " (especial)" : ""}</h3>
     <p>Queda <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
@@ -809,6 +859,7 @@ async function vistaSolicitudes() {
 
 async function resolverSolicitud(id, estado) {
   await sb.from("solicitud").update({ estado, aprobado_por: perfilActual.id }).eq("id", id);
+  actualizarNotificaciones();
   vistaSolicitudes();
 }
 
@@ -1391,6 +1442,7 @@ function recalcMontos(pref) {
 
 async function avanzarEstado(id, estado) {
   await sb.from("solicitud").update({ estado }).eq("id", id);
+  actualizarNotificaciones();
   vistaExpediente(id);
 }
 
