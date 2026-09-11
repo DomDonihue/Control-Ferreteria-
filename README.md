@@ -513,6 +513,18 @@ end $$;
 > `trg_compra_movimiento` crea el `movimiento_saldo` que alimenta la vista
 > `resumen_convenio`. Necesita un `contrato` con `estado = 'vigente'`.
 
+## Firma de V°B° del Director de Obras (PDF oficial)
+
+El PDF "Generar solicitud de materiales" estampa la firma/timbre del Director
+junto a "V°B° Director de Obras" **solo** cuando la solicitud ya está
+aprobada. La imagen vive en un bucket **privado** de Supabase Storage
+(`firmas/director.png`) — nunca en este repositorio, que es público — y se
+sube/reemplaza desde **Convenio / ferretería** (solo `admin`). Es un respaldo
+de control interno, no una firma electrónica avanzada.
+
+Correr **una vez** en el SQL Editor: `Documentacion/firma-director.sql`
+(crea el bucket privado y sus políticas).
+
 ## Anulación de documentos + Bitácora
 
 Las facturas, guías de despacho y notas de crédito **ya no se borran**: se

@@ -1666,12 +1666,37 @@ async function anularNotaCredito(id, solicitudId) {
   vistaExpediente(solicitudId);
 }
 
+// Firma/timbre del Director de Obras para el V°B° del documento oficial.
+// Vive en un bucket PRIVADO de Supabase (nunca en el repositorio, que es
+// público): se pide una URL firmada de 60 segundos y se descarga solo al
+// generar el PDF de una solicitud ya aprobada. Si no hay firma cargada o
+// falla la descarga, el PDF sigue saliendo igual, sin estampar.
+async function _firmaDirectorDataURL() {
+  try {
+    const { data, error } = await sb.storage.from("firmas").createSignedUrl("director.png", 60);
+    if (error || !data?.signedUrl) return null;
+    const resp = await fetch(data.signedUrl);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 // ---------- Hoja de solicitud (PDF, estilo cotización) ----------
-function descargarHojaPDF() {
+async function descargarHojaPDF() {
   const exp = window._expActual;
   if (!exp) return;
   if (!window.jspdf || !window.jspdf.jsPDF) { alert("No se pudo cargar el generador de PDF. Revisa la conexión."); return; }
   const { s, detalle } = exp;
+  const aprobada = ["aprobada", "enviada", "recibida", "facturada", "cerrada"].includes(s.estado);
+  const firma = aprobada ? await _firmaDirectorDataURL() : null;
   const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
   const M = 18;
   let y = M;
@@ -1730,9 +1755,21 @@ function descargarHojaPDF() {
   y += 12;
   doc.line(M, y, 90, y); y += 5;
   doc.text("Encargado de Operaciones (ITO)", M, y);
+
   y += 16;
-  doc.line(M, y, 90, y); y += 5;
+  const yLineaDirector = y;
+  if (firma) {
+    const fmt = (firma.match(/^data:image\/(\w+)/) || [, "PNG"])[1].toUpperCase().replace("JPG", "JPEG");
+    try { doc.addImage(firma, fmt, M - 2, yLineaDirector - 15, 50, 14); } catch (e) { /* imagen inválida: sigue sin estampar */ }
+  }
+  doc.line(M, yLineaDirector, 90, yLineaDirector);
+  y = yLineaDirector + 5;
   doc.text("V°B° Director de Obras", M, y);
+  if (firma) {
+    doc.setFontSize(7); doc.setTextColor(120);
+    doc.text("Firma electrónica de respaldo — documento de control interno.", M, y + 4);
+    doc.setFontSize(10); doc.setTextColor(0);
+  }
 
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text("Documento generado por Control Ferretería — Municipalidad de Doñihue", M, 288);
@@ -1755,6 +1792,9 @@ async function vistaConvenio() {
   }
   const c = (contratos || [])[0] || {};
   const nuevo = !c.id;
+
+  // ¿ya hay una firma cargada? (bucket privado "firmas", objeto fijo "director.png")
+  const { data: firmaHoy } = await sb.storage.from("firmas").createSignedUrl("director.png", 60);
 
   vista().innerHTML = `
     <div class="card">
@@ -1783,6 +1823,27 @@ async function vistaConvenio() {
       <button class="primario" id="cv-guardar">${nuevo ? "Registrar convenio" : "Guardar cambios"}</button>
       <p class="error oculto" id="cv-error"></p>
       <p class="ok-msg oculto" id="cv-ok"></p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Firma de V°B° — Director de Obras</h3>
+      <p class="hint">Se estampa sola en el PDF oficial de una solicitud <strong>ya aprobada</strong>
+        (junto a "V°B° Director de Obras"), como respaldo de control interno — no reemplaza una firma
+        electrónica avanzada. La imagen se guarda en un bucket <strong>privado</strong> de Supabase,
+        nunca en el repositorio (que es público): solo se descarga con una URL firmada de 60 segundos,
+        al momento de generar cada PDF.</p>
+      ${firmaHoy?.signedUrl ? `
+        <p class="hint" style="color:var(--ok)">✔ Hay una firma cargada.</p>
+        <img src="${firmaHoy.signedUrl}" alt="Firma actual" style="max-width:220px;border:1px solid var(--border);border-radius:8px;padding:6px;background:#fff">
+        <div class="acciones">
+          <button class="secundario" id="fd-quitar">Quitar firma</button>
+        </div>
+      ` : `<p class="hint">Todavía no hay ninguna firma cargada — el PDF sale sin estampar.</p>`}
+      <label style="margin-top:1rem">${firmaHoy?.signedUrl ? "Reemplazar por otra imagen" : "Subir imagen de la firma"} (PNG o JPG)</label>
+      <input id="fd-archivo" type="file" accept="image/png,image/jpeg">
+      <button class="primario" id="fd-subir">Guardar firma</button>
+      <p class="error oculto" id="fd-error"></p>
+      <p class="ok-msg oculto" id="fd-ok"></p>
     </div>
 
     ${(contratos || []).length > 1 ? `
@@ -1838,6 +1899,30 @@ async function vistaConvenio() {
     okEl.textContent = "Guardado. El Resumen se actualiza al recargar.";
     okEl.classList.remove("oculto");
     if (nuevo) setTimeout(vistaConvenio, 800);
+  });
+
+  const fdSubir = document.getElementById("fd-subir");
+  if (fdSubir) fdSubir.addEventListener("click", async () => {
+    const errorEl = document.getElementById("fd-error");
+    const okEl = document.getElementById("fd-ok");
+    errorEl.classList.add("oculto"); okEl.classList.add("oculto");
+    const file = document.getElementById("fd-archivo").files[0];
+    if (!file) { errorEl.textContent = "Elige una imagen primero."; errorEl.classList.remove("oculto"); return; }
+    if (file.size > 3 * 1024 * 1024) { errorEl.textContent = "La imagen supera los 3 MB."; errorEl.classList.remove("oculto"); return; }
+    fdSubir.disabled = true;
+    const { error } = await sb.storage.from("firmas").upload("director.png", file, { upsert: true, contentType: file.type });
+    fdSubir.disabled = false;
+    if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
+    okEl.textContent = "Firma guardada."; okEl.classList.remove("oculto");
+    setTimeout(vistaConvenio, 700);
+  });
+
+  const fdQuitar = document.getElementById("fd-quitar");
+  if (fdQuitar) fdQuitar.addEventListener("click", async () => {
+    if (!confirm("¿Quitar la firma cargada? El PDF oficial dejará de estamparla.")) return;
+    const { error } = await sb.storage.from("firmas").remove(["director.png"]);
+    if (error) { alert("No se pudo quitar: " + error.message); return; }
+    vistaConvenio();
   });
 }
 
