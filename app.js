@@ -600,12 +600,14 @@ async function vistaNuevaSolicitud() {
 
       <label class="chk"><input type="checkbox" id="ns-resp-informe"> Informe técnico complementario / cubicación de materiales</label>
       <div id="ns-informe-extra" class="oculto">
-        <p class="hint">Adjunta el informe técnico / cubicación en el expediente una vez ingresada la solicitud.</p>
+        <input id="ns-informe-archivo" type="file" accept=".pdf,.doc,.docx,image/*">
+        <p class="hint">Informe técnico / cubicación de materiales (PDF, Word o imagen, máx. 10 MB).</p>
       </div>
 
       <label class="chk"><input type="checkbox" id="ns-resp-presupuesto"> Presupuesto estimativo / planificación del trabajo</label>
       <div id="ns-presupuesto-extra" class="oculto">
-        <p class="hint">Adjunta el presupuesto estimativo en el expediente una vez ingresada la solicitud.</p>
+        <input id="ns-presupuesto-archivo" type="file" accept=".pdf,.doc,.docx,image/*">
+        <p class="hint">Presupuesto estimativo / planificación del trabajo (PDF, Word o imagen, máx. 10 MB).</p>
       </div>
 
       <label class="chk"><input type="checkbox" id="ns-resp-otro"> Otro:
@@ -614,8 +616,8 @@ async function vistaNuevaSolicitud() {
       <h4>5. Situaciones especiales</h4>
       <label class="chk"><input type="checkbox" id="ns-cdp-negativo"> Solicitud con CDP negativo (Manual, punto 8)</label>
       <div id="ns-cdp-extra" class="oculto">
-        <p class="hint" style="color:var(--warn)">Con CDP negativo la solicitud requiere justificación jurídica reforzada.
-          Esa justificación y su respaldo se adjuntan en el expediente una vez ingresada la solicitud.</p>
+        <input id="ns-cdp-archivo" type="file" accept=".pdf,.doc,.docx,image/*">
+        <p class="hint" style="color:var(--warn)">Justificación jurídica reforzada del CDP negativo (PDF, Word o imagen, máx. 10 MB).</p>
       </div>
       <label class="chk"><input type="checkbox" id="ns-fuera-catalogo"> El producto NO figura en el catálogo cerrado del contrato (Manual, punto 10)</label>
       <div id="ns-especial-extra" class="oculto">
@@ -791,6 +793,9 @@ async function guardarSolicitud() {
   };
   const rMemo = await subeUno("ns-memo");  if (rMemo.error) { mostrarError(rMemo.error); return; }
   const rFoto = await subeUno("ns-foto");  if (rFoto.error) { mostrarError(rFoto.error); return; }
+  const rInforme = await subeUno("ns-informe-archivo");     if (rInforme.error) { mostrarError(rInforme.error); return; }
+  const rPresupuesto = await subeUno("ns-presupuesto-archivo"); if (rPresupuesto.error) { mostrarError(rPresupuesto.error); return; }
+  const rCdp = await subeUno("ns-cdp-archivo");             if (rCdp.error) { mostrarError(rCdp.error); return; }
   const rJust = fuera_catalogo ? await subirArchivo("especiales", (document.getElementById("ns-just") || {}).files?.[0]) : { url: null };
   if (rJust.error) { mostrarError(rJust.error); return; }
 
@@ -817,6 +822,9 @@ async function guardarSolicitud() {
   };
   if (rMemo.url) payload.memo_url = rMemo.url;
   if (rFoto.url) payload.resp_fotografico_url = rFoto.url;
+  if (rInforme.url) payload.resp_informe_url = rInforme.url;
+  if (rPresupuesto.url) payload.resp_presupuesto_url = rPresupuesto.url;
+  if (rCdp.url) payload.cdp_negativo_url = rCdp.url;
   if (fuera_catalogo) {
     payload.justificacion_especial = [descripcion_requerimiento, motivo, situacion_actual].filter(Boolean).join(" — ");
     if (rJust.url) payload.just_juridica_url = rJust.url;
@@ -1041,6 +1049,14 @@ async function vistaExpediente(id) {
           s.cdp_negativo ? "⚠ CDP negativo" : null,
           especial ? "⚠ Producto fuera de catálogo" : null,
         ].filter(Boolean).join(" · ") || "Sin respaldos marcados."}
+      </p>
+      <p class="hint" style="margin-top:0.3rem">
+        ${[
+          s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver fotografías</a>` : null,
+          s.resp_informe_url ? `<a href="${s.resp_informe_url}" target="_blank" rel="noopener">ver informe técnico</a>` : null,
+          s.resp_presupuesto_url ? `<a href="${s.resp_presupuesto_url}" target="_blank" rel="noopener">ver presupuesto</a>` : null,
+          s.cdp_negativo_url ? `<a href="${s.cdp_negativo_url}" target="_blank" rel="noopener">ver justificación CDP negativo</a>` : null,
+        ].filter(Boolean).join(" · ")}
       </p>
 
       <div class="acciones">

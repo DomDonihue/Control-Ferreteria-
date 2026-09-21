@@ -25,7 +25,9 @@ alter table solicitud add column if not exists resp_fotografico boolean not null
 alter table solicitud add column if not exists num_fotos integer;
 alter table solicitud add column if not exists resp_fotografico_url text;
 alter table solicitud add column if not exists resp_informe_tecnico boolean not null default false;
+alter table solicitud add column if not exists resp_informe_url text;
 alter table solicitud add column if not exists resp_presupuesto boolean not null default false;
+alter table solicitud add column if not exists resp_presupuesto_url text;
 alter table solicitud add column if not exists resp_otro boolean not null default false;
 alter table solicitud add column if not exists resp_otro_texto text;
 
