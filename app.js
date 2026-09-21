@@ -726,19 +726,10 @@ async function leerFormularioPDF(file) {
       if (opt) document.getElementById("ns-unidad").value = opt.value;
     }
 
-    lineasSolicitud = [];
-    for (let r = 0; r < 5; r++) {
-      const mat = T(`mat_r${r}_c0`);
-      if (!mat) continue;
-      const art = catalogoPorDesc.get(mat.trim().toLowerCase());
-      lineasSolicitud.push({
-        descripcion: mat,
-        articulo_id: art ? art.id : null,
-        cantidad_solicitada: num(T(`mat_r${r}_c1`)),
-        unidad_medida: (art && art.unidad_medida) || T(`mat_r${r}_c2`) || "",
-      });
-    }
-    pintarLineas();
+    // Los materiales NO se autocompletan: el nombre que trae el PDF puede no
+    // calzar con la descripción exacta del catálogo, así que se agregan a
+    // mano eligiéndolos del catálogo (evita duplicados o descripciones libres
+    // que no encuentran su articulo_id).
 
     document.getElementById("ns-resp-foto").checked = C("chk_fotografico");
     set("ns-num-fotos", T("num_fotos"));
@@ -759,7 +750,7 @@ async function leerFormularioPDF(file) {
     document.getElementById("ns-fuera-catalogo").checked = fuera;
     document.getElementById("ns-especial-extra").classList.toggle("oculto", !fuera);
 
-    msg.textContent = "Formulario autocompletado desde el PDF. Revísalo y corrige lo que falte.";
+    msg.textContent = "Formulario autocompletado desde el PDF. Revísalo, corrige lo que falte y agrega los materiales manualmente desde el catálogo (punto 3).";
   } catch (e) {
     msg.textContent = "No se pudo leer el PDF: " + e.message + ". Llena el formulario a mano.";
   }
