@@ -591,18 +591,32 @@ async function vistaNuevaSolicitud() {
       <label>Memo de solicitud (Memorándum)</label>
       <input id="ns-memo" type="file" accept=".pdf,.doc,.docx,image/*">
 
-      <label class="chk"><input type="checkbox" id="ns-resp-foto"> Respaldo fotográfico &nbsp;·&nbsp; N° de fotografías:
-        <input id="ns-num-fotos" type="number" min="0" class="chk-inline"></label>
-      <input id="ns-foto" type="file" accept=".pdf,image/*">
-      <p class="hint">PDF o imagen del daño / situación (máx. 10 MB). Si son varias fotos, únelas en un PDF.</p>
+      <label class="chk"><input type="checkbox" id="ns-resp-foto"> Respaldo fotográfico</label>
+      <div id="ns-foto-extra" class="oculto">
+        <label>N° de fotografías: <input id="ns-num-fotos" type="number" min="0" class="chk-inline"></label>
+        <input id="ns-foto" type="file" accept=".pdf,image/*">
+        <p class="hint">PDF o imagen del daño / situación (máx. 10 MB). Si son varias fotos, únelas en un PDF.</p>
+      </div>
 
       <label class="chk"><input type="checkbox" id="ns-resp-informe"> Informe técnico complementario / cubicación de materiales</label>
+      <div id="ns-informe-extra" class="oculto">
+        <p class="hint">Adjunta el informe técnico / cubicación en el expediente una vez ingresada la solicitud.</p>
+      </div>
+
       <label class="chk"><input type="checkbox" id="ns-resp-presupuesto"> Presupuesto estimativo / planificación del trabajo</label>
+      <div id="ns-presupuesto-extra" class="oculto">
+        <p class="hint">Adjunta el presupuesto estimativo en el expediente una vez ingresada la solicitud.</p>
+      </div>
+
       <label class="chk"><input type="checkbox" id="ns-resp-otro"> Otro:
         <input id="ns-resp-otro-texto" placeholder="especificar" class="chk-inline" style="width:220px"></label>
 
       <h4>5. Situaciones especiales</h4>
       <label class="chk"><input type="checkbox" id="ns-cdp-negativo"> Solicitud con CDP negativo (Manual, punto 8)</label>
+      <div id="ns-cdp-extra" class="oculto">
+        <p class="hint" style="color:var(--warn)">Con CDP negativo la solicitud requiere justificación jurídica reforzada.
+          Esa justificación y su respaldo se adjuntan en el expediente una vez ingresada la solicitud.</p>
+      </div>
       <label class="chk"><input type="checkbox" id="ns-fuera-catalogo"> El producto NO figura en el catálogo cerrado del contrato (Manual, punto 10)</label>
       <div id="ns-especial-extra" class="oculto">
         <p class="hint" style="color:var(--warn)">Al marcar "fuera de catálogo" la solicitud entra como
@@ -643,6 +657,16 @@ async function vistaNuevaSolicitud() {
 
   document.getElementById("ns-fuera-catalogo").addEventListener("change", (e) => {
     document.getElementById("ns-especial-extra").classList.toggle("oculto", !e.target.checked);
+  });
+  [
+    ["ns-resp-foto", "ns-foto-extra"],
+    ["ns-resp-informe", "ns-informe-extra"],
+    ["ns-resp-presupuesto", "ns-presupuesto-extra"],
+    ["ns-cdp-negativo", "ns-cdp-extra"],
+  ].forEach(([chkId, extraId]) => {
+    document.getElementById(chkId).addEventListener("change", (e) => {
+      document.getElementById(extraId).classList.toggle("oculto", !e.target.checked);
+    });
   });
   document.getElementById("ns-pdf").addEventListener("change", (e) => {
     if (e.target.files[0]) leerFormularioPDF(e.target.files[0]);
@@ -721,6 +745,14 @@ async function leerFormularioPDF(file) {
     document.getElementById("ns-resp-otro").checked = C("chk_otro");
     set("ns-resp-otro-texto", T("otro_texto"));
     document.getElementById("ns-cdp-negativo").checked = C("chk_cdp_negativo");
+    [
+      ["ns-resp-foto", "ns-foto-extra"],
+      ["ns-resp-informe", "ns-informe-extra"],
+      ["ns-resp-presupuesto", "ns-presupuesto-extra"],
+      ["ns-cdp-negativo", "ns-cdp-extra"],
+    ].forEach(([chkId, extraId]) => {
+      document.getElementById(extraId).classList.toggle("oculto", !document.getElementById(chkId).checked);
+    });
     const fuera = C("chk_no_catalogo");
     document.getElementById("ns-fuera-catalogo").checked = fuera;
     document.getElementById("ns-especial-extra").classList.toggle("oculto", !fuera);
