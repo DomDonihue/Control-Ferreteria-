@@ -332,6 +332,7 @@ const ICONOS = {
 const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
+  { id: "nueva-operaciones", label: "Solicitud de operaciones (ITO)", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaNuevaSolicitudOperaciones },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
@@ -849,8 +850,148 @@ async function guardarSolicitud() {
 }
 
 // ---------------------------------------------------------------------
+// Solicitud de operaciones (ITO / Dirección de Obras) — versión corta.
+// Mismo flujo y mismas tablas (solicitud, solicitud_detalle) que la
+// solicitud normal, pero sin las secciones de descripción técnica,
+// respaldos adjuntos y situaciones especiales: al ser un requerimiento
+// interno de la propia Dirección de Obras no necesita tanta tramitación.
+// Igual queda "pendiente" del V°B° del Director de Obras.
+// ---------------------------------------------------------------------
+async function vistaNuevaSolicitudOperaciones() {
+  const { data: unidades } = await sb.from("unidad").select("id, nombre").order("nombre");
+  lineasSolicitud = [];
+
+  vista().innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Solicitud de operaciones — Dirección de Obras</h3>
+      <p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras (ITO).
+        El N° de solicitud se genera automáticamente. Sigue el mismo flujo que las demás solicitudes:
+        queda <span class="pill pendiente">pendiente</span> del V°B° del Director de Obras.</p>
+
+      <label>Unidad responsable</label>
+      <select id="nso-unidad">
+        <option value="">— selecciona —</option>
+        ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+      </select>
+      <label>Responsable del requerimiento</label>
+      <input id="nso-solicitante" value="${esc(perfilActual.nombre)}" placeholder="Nombre y cargo">
+      <label>Ubicación de uso de los materiales</label>
+      <textarea id="nso-ubicacion" rows="2" placeholder="Calle, número, sector"></textarea>
+      <label>Motivo</label>
+      <textarea id="nso-motivo" rows="2" placeholder="Motivo breve de la operación"></textarea>
+
+      <h4>Detalle de materiales</h4>
+      <div id="nso-lineas"></div>
+      <div class="linea-detalle" style="grid-template-columns:3fr 1fr auto">
+        <div><label>Material</label><input id="nso-mat" list="nso-catalogo" placeholder="Elige del catálogo" autocomplete="off"></div>
+        <div><label>Cantidad</label><input id="nso-cant" type="number" min="0" step="0.01"></div>
+        <div><button class="secundario" id="nso-agregar" style="margin-top:0">+ Agregar</button></div>
+      </div>
+      <datalist id="nso-catalogo"></datalist>
+
+      <button class="primario" id="nso-guardar">Ingresar solicitud</button>
+      <p class="error oculto" id="nso-error"></p>
+    </div>
+  `;
+
+  const { data: articulos } = await sb.from("articulo").select("id, descripcion, unidad_medida").order("descripcion");
+  catalogoPorDesc = new Map((articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a]));
+  document.getElementById("nso-catalogo").innerHTML =
+    (articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("");
+
+  const pintarLineasNso = () => {
+    const cont = document.getElementById("nso-lineas");
+    if (!lineasSolicitud.length) {
+      cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas materiales.</p>";
+      return;
+    }
+    cont.innerHTML = `<table>
+      <tr><th>Material</th><th class="num">Cantidad</th><th></th></tr>
+      ${lineasSolicitud.map((l, i) => `<tr>
+          <td>${esc(l.descripcion)}</td>
+          <td class="num">${l.cantidad_solicitada}</td>
+          <td><button class="secundario" onclick="quitarLinea(${i});pintarLineasNsoGlobal()">Quitar</button></td>
+        </tr>`).join("")}
+    </table>`;
+  };
+  window.pintarLineasNsoGlobal = pintarLineasNso;
+
+  document.getElementById("nso-agregar").addEventListener("click", () => {
+    const mat = document.getElementById("nso-mat").value.trim();
+    const cant = parseFloat(document.getElementById("nso-cant").value);
+    if (!mat || !cant) return;
+    const art = catalogoPorDesc.get(mat.toLowerCase());
+    lineasSolicitud.push({
+      descripcion: mat,
+      articulo_id: art ? art.id : null,
+      cantidad_solicitada: cant,
+      unidad_medida: (art && art.unidad_medida) || "",
+    });
+    ["nso-mat", "nso-cant"].forEach(id => document.getElementById(id).value = "");
+    pintarLineasNso();
+  });
+
+  document.getElementById("nso-guardar").addEventListener("click", guardarSolicitudOperaciones);
+  pintarLineasNso();
+}
+
+async function guardarSolicitudOperaciones() {
+  if (!_lock()) return;
+  try {
+    const errorEl = document.getElementById("nso-error");
+    const mostrarError = (msg) => { errorEl.textContent = msg; errorEl.classList.remove("oculto"); };
+    errorEl.classList.add("oculto");
+
+    const val = (id) => document.getElementById(id).value.trim();
+    const unidad_id = document.getElementById("nso-unidad").value || perfilActual.unidad_id || null;
+    const solicitante = val("nso-solicitante");
+    const ubicacion = val("nso-ubicacion");
+    const motivo = val("nso-motivo") || "Solicitud de operaciones — Dirección de Obras";
+
+    if (!unidad_id) { mostrarError("Selecciona la unidad responsable."); return; }
+    if (!solicitante) { mostrarError("Indica el responsable del requerimiento."); return; }
+    if (!ubicacion) { mostrarError("Indica la ubicación de uso de los materiales."); return; }
+    if (!lineasSolicitud.length) { mostrarError("Agrega al menos un material."); return; }
+
+    const payload = {
+      unidad_id, solicitante, motivo, ubicacion,
+      fecha_solicitud: hoyISO(),
+      tipo: "operaciones",
+    };
+
+    const { data: solicitud, error } = await sb.from("solicitud").insert(payload).select().single();
+    if (error) { mostrarError(error.message); return; }
+
+    const detalle = lineasSolicitud.map(l => ({
+      solicitud_id: solicitud.id,
+      articulo_id: l.articulo_id || null,
+      descripcion_libre: l.descripcion,
+      unidad_medida_libre: l.unidad_medida || null,
+      cantidad_solicitada: l.cantidad_solicitada,
+    }));
+    const { error: errorDetalle } = await sb.from("solicitud_detalle").insert(detalle);
+    if (errorDetalle) { mostrarError(errorDetalle.message); return; }
+
+    actualizarNotificaciones();
+    vista().innerHTML = `<div class="card">
+      <h3 style="margin-top:0">Solicitud de operaciones ingresada</h3>
+      <p>N° ${solicitud.n_solicitud ? esc(String(solicitud.n_solicitud)) : ""} · Queda
+      <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
+      Sigue el mismo flujo que las demás solicitudes: una vez aprobada, descárgala desde
+      <strong>Expedientes</strong> para continuar con guías y factura.</p>
+    </div>`;
+  } finally { _unlock(); }
+}
+
+// ---------------------------------------------------------------------
 // Solicitudes (listar + aprobar/rechazar si puedes operar: admin_ito o admin)
 // ---------------------------------------------------------------------
+function pillTipoSolicitud(tipo) {
+  if (tipo === "especial") return `<span class="pill enviada">especial</span> `;
+  if (tipo === "operaciones") return `<span class="pill enviada">operaciones DOM</span> `;
+  return "";
+}
+
 async function vistaSolicitudes() {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
   const { data, error } = await sb
@@ -871,7 +1012,7 @@ async function vistaSolicitudes() {
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
             <td>
-              ${s.tipo === "especial" ? `<span class="pill enviada">especial</span> ` : ""}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
+              ${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             <td><span class="pill ${s.estado}">${s.estado}</span></td>
@@ -937,7 +1078,7 @@ async function vistaExpedientes(filtroUnidad) {
           return `<tr>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}</td>
-            <td>${s.tipo === "especial" ? `<span class="pill enviada">especial</span> ` : ""}${esc(s.motivo)}</td>
+            <td>${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}</td>
             <td><span class="pill ${s.estado}">${s.estado}</span></td>
             <td class="num">${g.length || "—"}</td>
             <td>${f.length ? '<span class="pill facturada">sí</span>' : "—"}</td>
