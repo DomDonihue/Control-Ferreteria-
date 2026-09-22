@@ -333,7 +333,8 @@ const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
   { id: "nueva-operaciones", label: "Solicitud de operaciones (ITO)", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaNuevaSolicitudOperaciones },
-  { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
+  { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: () => vistaSolicitudes() },
+  { id: "solicitudes-operaciones", label: "Solicitudes de operaciones", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "lector_operativo"], render: vistaSolicitudesOperaciones },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
   { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin"], render: vistaCatalogo },
@@ -992,22 +993,32 @@ function pillTipoSolicitud(tipo) {
   return "";
 }
 
-async function vistaSolicitudes() {
+let filtroTipoSolicitudes = null;
+
+async function vistaSolicitudesOperaciones() {
+  return vistaSolicitudes("operaciones");
+}
+
+async function vistaSolicitudes(filtroTipo) {
+  filtroTipoSolicitudes = filtroTipo || null;
   vista().innerHTML = "<div class='card'>Cargando…</div>";
-  const { data, error } = await sb
+  let query = sb
     .from("solicitud")
     .select("*, unidad(nombre), obra(nombre)")
     .order("creado_en", { ascending: false });
+  if (filtroTipo) query = query.eq("tipo", filtroTipo);
+  const { data, error } = await query;
 
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
   const puedeVB = esDirector(); // visto bueno del Director de Obras (o admin)
   vista().innerHTML = `
     <div class="card">
+      <h3 style="margin-top:0">${filtroTipo === "operaciones" ? "Solicitudes de operaciones (Dirección de Obras)" : "Solicitudes"}</h3>
       ${puedeVB ? `<p class="hint">Como Director de Obras das el visto bueno: aprueba o rechaza las solicitudes pendientes.</p>` : ""}
       <table>
         <tr><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th><th>Estado</th><th></th></tr>
-        ${data.map(s => `
+        ${(data.length ? data : []).map(s => `
           <tr>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
@@ -1023,7 +1034,7 @@ async function vistaSolicitudes() {
               ` : `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver expediente</button>`}
             </td>
           </tr>
-        `).join("")}
+        `).join("") || `<tr><td colspan="5" class="hint">No hay solicitudes${filtroTipo === "operaciones" ? " de operaciones" : ""} todavía.</td></tr>`}
       </table>
     </div>
   `;
@@ -1032,7 +1043,7 @@ async function vistaSolicitudes() {
 async function resolverSolicitud(id, estado) {
   await sb.from("solicitud").update({ estado, aprobado_por: perfilActual.id }).eq("id", id);
   actualizarNotificaciones();
-  vistaSolicitudes();
+  vistaSolicitudes(filtroTipoSolicitudes);
 }
 
 // =====================================================================
