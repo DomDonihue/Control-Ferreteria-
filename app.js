@@ -997,7 +997,7 @@ async function vistaSolicitudes() {
   const { data, error } = await sb
     .from("solicitud")
     .select("*, unidad(nombre), obra(nombre)")
-    .order("creado_en", { ascending: false });
+    .order("n_solicitud", { ascending: false });
 
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
@@ -1006,9 +1006,10 @@ async function vistaSolicitudes() {
     <div class="card">
       ${puedeVB ? `<p class="hint">Como Director de Obras das el visto bueno: aprueba o rechaza las solicitudes pendientes.</p>` : ""}
       <table>
-        <tr><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th><th>Estado</th><th></th></tr>
+        <tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th><th>Estado</th><th></th></tr>
         ${(data.length ? data : []).map(s => `
           <tr>
+            <td class="num">${s.n_solicitud ?? "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
             <td>
@@ -1054,7 +1055,7 @@ async function subirArchivo(bucket, file) {
 async function vistaExpedientes(filtroUnidad) {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
   const [{ data: solsTodas, error }, { data: guias }, { data: facturas }] = await Promise.all([
-    sb.from("solicitud").select("*, unidad(nombre)").order("creado_en", { ascending: false }),
+    sb.from("solicitud").select("*, unidad(nombre)").order("n_solicitud", { ascending: false }),
     sb.from("guia_despacho").select("solicitud_id, monto_bruto"),
     sb.from("factura").select("solicitud_id, monto_bruto"),
   ]);
@@ -1069,13 +1070,14 @@ async function vistaExpedientes(filtroUnidad) {
       <p class="hint">Cada solicitud reúne su hoja, las guías de despacho y la factura. Haz clic para abrir el expediente.</p>
       ${filtroUnidad ? `<p class="hint">Filtrado por unidad: <strong>${esc(filtroUnidad)}</strong> · <a href="#" onclick="vistaExpedientes();return false;">quitar filtro</a></p>` : ""}
       <table>
-        <tr><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Guías</th><th>Factura</th><th class="num">Total bruto</th><th></th></tr>
+        <tr><th>N°</th><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Guías</th><th>Factura</th><th class="num">Total bruto</th><th></th></tr>
         ${(sols || []).map(s => {
           const g = cuenta(guias, s.id);
           const f = cuenta(facturas, s.id);
           const totalBruto = f.length ? f.reduce((a, x) => a + Number(x.monto_bruto || 0), 0)
                                       : g.reduce((a, x) => a + Number(x.monto_bruto || 0), 0);
           return `<tr>
+            <td class="num">${s.n_solicitud ?? "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}</td>
             <td>${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}</td>
