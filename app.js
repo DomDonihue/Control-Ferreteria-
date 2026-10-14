@@ -54,6 +54,11 @@ function mostrarLogin() {
     const e = document.getElementById("login-error");
     e.textContent = "Se cerró la sesión por inactividad. Vuelve a ingresar.";
     e.classList.remove("oculto");
+  } else if (sessionStorage.getItem("clave_nueva_ok")) {
+    sessionStorage.removeItem("clave_nueva_ok");
+    const e = document.getElementById("login-ok");
+    e.textContent = "Tu clave quedó creada. Ingresa con tu correo y la clave nueva.";
+    e.classList.remove("oculto");
   } else if (_errorEnlace) {
     const e = document.getElementById("login-error");
     e.textContent = "El enlace del correo venció o ya fue usado. Pide al administrador que te envíe uno nuevo.";
@@ -270,9 +275,17 @@ async function vistaCambiarClave(obligatorio) {
     _llegoPorEnlaceClave = false;
     history.replaceState(null, "", location.pathname);
 
-    okEl.textContent = "Clave actualizada.";
+    okEl.textContent = obligatorio
+      ? "Clave actualizada. Te llevamos al ingreso para que entres con tu clave nueva…"
+      : "Clave actualizada.";
     okEl.classList.remove("oculto");
-    if (obligatorio) setTimeout(armarTabs, 700);
+    if (obligatorio) {
+      sessionStorage.setItem("clave_nueva_ok", "1");
+      setTimeout(async () => {
+        try { await sb.auth.signOut(); } catch (e) {}
+        location.reload();
+      }, 1500);
+    }
   });
 }
 
