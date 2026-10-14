@@ -2202,7 +2202,35 @@ async function vistaUsuarios() {
   const opcionesUnidad = (sel) => `<option value="">— sin unidad —</option>` +
     (unidades || []).map(u => `<option value="${u.id}" ${u.id === sel ? "selected" : ""}>${esc(u.nombre)}</option>`).join("");
 
+  const ROLES_CREABLES = ["admin_ito", "lector_operativo", "lector_pagos"];
+  const claveSugerida = () => {
+    const abc = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const r = crypto.getRandomValues(new Uint32Array(10));
+    return Array.from(r, n => abc[n % abc.length]).join("");
+  };
+
   vista().innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Crear usuario</h3>
+      <p class="hint">Crea la cuenta y le asigna el perfil. Entrégale el correo y la clave
+        provisoria: el sistema le obliga a cambiarla en su primer ingreso.</p>
+      <label>Nombre completo</label>
+      <input id="cu-nombre" autocomplete="off">
+      <label>Correo institucional</label>
+      <input id="cu-email" type="email" placeholder="nombre@donihue.cl" autocomplete="off">
+      <label>Perfil</label>
+      <select id="cu-rol">
+        ${ROLES_CREABLES.map(v => `<option value="${v}">${ROLES[v]}</option>`).join("")}
+      </select>
+      <label>Unidad (opcional)</label>
+      <select id="cu-unidad">${opcionesUnidad("")}</select>
+      <label>Clave provisoria</label>
+      <input id="cu-clave" value="${claveSugerida()}" autocomplete="off">
+      <button class="primario" id="cu-crear">Crear usuario</button>
+      <p class="error oculto" id="cu-error"></p>
+      <p class="hint oculto" id="cu-ok" style="color:var(--ok)"></p>
+    </div>
+
     <div class="card">
       <h3 style="margin-top:0">Usuarios y permisos</h3>
       <p class="hint">El rol define qué pestañas ve cada persona. La unidad es obligatoria
@@ -2230,6 +2258,30 @@ async function vistaUsuarios() {
       <p class="hint oculto" id="us-ok" style="color:var(--ok)"></p>
     </div>
   `;
+
+  document.getElementById("cu-crear").addEventListener("click", async () => {
+    if (!_lock()) return;
+    try {
+      const errorEl = document.getElementById("cu-error");
+      const okEl = document.getElementById("cu-ok");
+      errorEl.classList.add("oculto"); okEl.classList.add("oculto");
+      const body = {
+        nombre: document.getElementById("cu-nombre").value.trim(),
+        email: document.getElementById("cu-email").value.trim(),
+        rol: document.getElementById("cu-rol").value,
+        unidad_id: document.getElementById("cu-unidad").value || null,
+        clave: document.getElementById("cu-clave").value,
+      };
+      const { data, error: errFn } = await sb.functions.invoke("crear-usuario", { body });
+      let msg = data?.error || errFn?.message;
+      if (errFn?.context?.json) { try { msg = (await errFn.context.json()).error || msg; } catch { /* sin detalle */ } }
+      if (msg) { errorEl.textContent = "No se pudo crear: " + msg; errorEl.classList.remove("oculto"); return; }
+      await vistaUsuarios();
+      const ok = document.getElementById("cu-ok");
+      ok.textContent = `Usuario creado: ${body.email} · clave provisoria: ${body.clave}`;
+      ok.classList.remove("oculto");
+    } finally { _unlock(); }
+  });
 
   vista().querySelectorAll(".u-guardar").forEach(btn => {
     btn.addEventListener("click", async () => {
