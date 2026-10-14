@@ -120,6 +120,26 @@ document.getElementById("btn-login").addEventListener("click", async () => {
   await cargarPerfilYArmarApp(data.user);
 });
 
+document.getElementById("btn-olvide").addEventListener("click", async () => {
+  const email = document.getElementById("login-email").value.trim();
+  const errorEl = document.getElementById("login-error");
+  const okEl = document.getElementById("login-ok");
+  errorEl.classList.add("oculto"); okEl.classList.add("oculto");
+  if (!email) {
+    errorEl.textContent = "Escribe tu correo arriba y vuelve a pulsar «¿Olvidaste tu clave?».";
+    errorEl.classList.remove("oculto");
+    return;
+  }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  if (error) {
+    errorEl.textContent = "No se pudo enviar el correo: " + error.message;
+    errorEl.classList.remove("oculto");
+    return;
+  }
+  okEl.textContent = "Si el correo está registrado, te enviamos un enlace para crear una clave nueva. Revisa también la carpeta de spam.";
+  okEl.classList.remove("oculto");
+});
+
 document.getElementById("btn-logout").addEventListener("click", async () => {
   await sb.auth.signOut();
   location.reload();
