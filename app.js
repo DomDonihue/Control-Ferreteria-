@@ -5,6 +5,12 @@
 // esquema — este archivo solo arma pantallas y hace consultas.
 // =====================================================================
 
+// Se lee ANTES de crear el cliente: supabase-js consume y borra el #hash del
+// enlace del correo (recuperar clave / invitación) apenas arranca.
+const _hashEnlace = location.hash;
+let _llegoPorEnlaceClave = /type=(recovery|invite)/.test(_hashEnlace);
+const _errorEnlace = /error_code=otp_expired|error=access_denied/.test(_hashEnlace);
+
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let perfilActual = null; // { id, nombre, rol, unidad_id }
@@ -47,6 +53,10 @@ function mostrarLogin() {
     sessionStorage.removeItem("cierre_inactividad");
     const e = document.getElementById("login-error");
     e.textContent = "Se cerró la sesión por inactividad. Vuelve a ingresar.";
+    e.classList.remove("oculto");
+  } else if (_errorEnlace) {
+    const e = document.getElementById("login-error");
+    e.textContent = "El enlace del correo venció o ya fue usado. Pide al administrador que te envíe uno nuevo.";
     e.classList.remove("oculto");
   }
 }
@@ -192,8 +202,9 @@ async function cargarPerfilYArmarApp(user) {
   iniciarControlInactividad();
   iniciarNotificaciones();
 
-  // Clave provisoria: al primer ingreso obliga a cambiarla antes de seguir.
-  if (perfil.debe_cambiar_clave) {
+  // Clave provisoria, o llegó desde el enlace del correo (recuperar clave /
+  // invitación): obliga a definir una clave nueva antes de seguir.
+  if (perfil.debe_cambiar_clave || _llegoPorEnlaceClave) {
     document.getElementById("tabs").innerHTML = "";
     vistaCambiarClave(true);
   } else {
@@ -207,10 +218,10 @@ async function cargarPerfilYArmarApp(user) {
 async function vistaCambiarClave(obligatorio) {
   vista().innerHTML = `
     <div class="card" style="max-width:460px">
-      <h3 style="margin-top:0">${obligatorio ? "Cambia tu clave provisoria" : "Cambiar clave"}</h3>
-      ${obligatorio ? `<p class="hint">Estás usando una clave provisoria. Define una nueva para continuar.</p>` : ""}
+      <h3 style="margin-top:0">${obligatorio ? "Crea tu nueva clave" : "Cambiar clave"}</h3>
+      ${obligatorio ? `<p class="hint">Define una clave nueva para continuar.</p>` : ""}
       <label>Nueva clave</label>
-      <input id="cc-1" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+      <input id="cc-1" type="password" autocomplete="new-password" placeholder="8 o más caracteres, con letras y números">
       <label>Repite la nueva clave</label>
       <input id="cc-2" type="password" autocomplete="new-password">
       <button class="primario" id="cc-guardar">Guardar clave</button>
@@ -225,7 +236,10 @@ async function vistaCambiarClave(obligatorio) {
 
     const c1 = document.getElementById("cc-1").value;
     const c2 = document.getElementById("cc-2").value;
-    if (c1.length < 6) { errorEl.textContent = "La clave debe tener al menos 6 caracteres."; errorEl.classList.remove("oculto"); return; }
+    if (!/^[A-Za-z0-9]{8,}$/.test(c1) || !/[A-Za-z]/.test(c1) || !/[0-9]/.test(c1)) {
+      errorEl.textContent = "La clave debe tener al menos 8 caracteres, solo letras y números, con al menos una letra y un número.";
+      errorEl.classList.remove("oculto"); return;
+    }
     if (c1 !== c2) { errorEl.textContent = "Las dos claves no coinciden."; errorEl.classList.remove("oculto"); return; }
 
     const { error } = await sb.auth.updateUser({ password: c1 });
@@ -233,6 +247,8 @@ async function vistaCambiarClave(obligatorio) {
 
     await sb.rpc("marcar_clave_cambiada");        // requiere la función del README
     perfilActual.debe_cambiar_clave = false;
+    _llegoPorEnlaceClave = false;
+    history.replaceState(null, "", location.pathname);
 
     okEl.textContent = "Clave actualizada.";
     okEl.classList.remove("oculto");
