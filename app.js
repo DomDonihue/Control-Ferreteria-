@@ -2290,7 +2290,7 @@ async function vistaUsuarios() {
         <tbody>
           ${(perfiles || []).map(p => `
             <tr data-id="${p.id}">
-              <td>${esc(p.nombre) || "(sin nombre)"}${p.id === perfilActual.id ? " <span class='hint'>(tú)</span>" : ""}</td>
+              <td><input class="u-nombre" value="${esc(p.nombre)}" placeholder="Nombre completo">${p.id === perfilActual.id ? " <span class='hint'>(tú)</span>" : ""}</td>
               <td><select class="u-rol">${opcionesRol(p.rol)}</select></td>
               <td><select class="u-unidad">${opcionesUnidad(p.unidad_id)}</select></td>
               <td>${p.debe_cambiar_clave
@@ -2338,13 +2338,15 @@ async function vistaUsuarios() {
       const id = tr.dataset.id;
       const rol = tr.querySelector(".u-rol").value;
       const unidad_id = tr.querySelector(".u-unidad").value || null;
+      const nombre = tr.querySelector(".u-nombre").value.trim();
       const errorEl = document.getElementById("us-error");
       const okEl = document.getElementById("us-ok");
       errorEl.classList.add("oculto");
       okEl.classList.add("oculto");
       btn.disabled = true;
 
-      const { error: errUpd } = await sb.from("perfiles").update({ rol, unidad_id }).eq("id", id);
+      if (!nombre) { btn.disabled = false; errorEl.textContent = "El nombre no puede quedar vacío."; errorEl.classList.remove("oculto"); return; }
+      const { error: errUpd } = await sb.from("perfiles").update({ nombre, rol, unidad_id }).eq("id", id);
       btn.disabled = false;
 
       if (errUpd) {
@@ -2354,7 +2356,11 @@ async function vistaUsuarios() {
       }
       okEl.textContent = "Guardado.";
       okEl.classList.remove("oculto");
-      if (id === perfilActual.id) { perfilActual.rol = rol; perfilActual.unidad_id = unidad_id; armarTabs(); }
+      if (id === perfilActual.id) {
+        perfilActual.nombre = nombre; perfilActual.rol = rol; perfilActual.unidad_id = unidad_id;
+        document.getElementById("quien-soy").textContent = `${nombre} · ${etiquetaRol(rol)}`;
+        armarTabs();
+      }
     });
   });
 
