@@ -1049,8 +1049,11 @@ async function guardarSolicitudOperaciones() {
 // ---------------------------------------------------------------------
 let lineasCotizacion = [];
 
-function vistaCotizacionProveedor() {
+async function vistaCotizacionProveedor() {
   lineasCotizacion = [];
+  // Por defecto se cotiza con el proveedor del convenio vigente (editable).
+  const { data: convenio } = await sb.from("contrato").select("proveedor")
+    .eq("estado", "vigente").order("creado_en", { ascending: false }).limit(1).maybeSingle();
   vista().innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">Solicitar cotización a proveedor</h3>
@@ -1058,7 +1061,8 @@ function vistaCotizacionProveedor() {
         descarga el PDF para enviarlo al proveedor. No se guarda en el sistema.</p>
 
       <label>Proveedor</label>
-      <input id="cp-proveedor" placeholder="Razón social o nombre" autocomplete="off">
+      <input id="cp-proveedor" value="${esc(convenio?.proveedor)}" placeholder="Razón social o nombre" autocomplete="off">
+      ${convenio?.proveedor ? `<p class="hint" style="margin-top:0">Proveedor del convenio vigente. Puedes cambiarlo si cotizas con otro.</p>` : ""}
       <label>Atención a (opcional)</label>
       <input id="cp-atencion" placeholder="Persona de contacto del proveedor" autocomplete="off">
 
