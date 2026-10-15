@@ -383,7 +383,7 @@ const ICONOS = {
 const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
-  { id: "nueva-operaciones", label: "Solicitud de operaciones (ITO)", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaNuevaSolicitudOperaciones },
+  { id: "nueva-operaciones", label: "Solicitudes Encargado", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaNuevaSolicitudOperaciones },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
@@ -911,7 +911,7 @@ async function vistaNuevaSolicitudOperaciones() {
 
   vista().innerHTML = `
     <div class="card">
-      <h3 style="margin-top:0">Solicitud de operaciones — Dirección de Obras</h3>
+      <h3 style="margin-top:0">Solicitudes Encargado — Dirección de Obras</h3>
       <p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras (ITO).
         El N° de solicitud se genera automáticamente. Sigue el mismo flujo que las demás solicitudes:
         queda <span class="pill pendiente">pendiente</span> del V°B° del Director de Obras.</p>
@@ -1032,7 +1032,7 @@ async function guardarSolicitudOperaciones() {
 
     actualizarNotificaciones();
     vista().innerHTML = `<div class="card">
-      <h3 style="margin-top:0">Solicitud de operaciones ingresada</h3>
+      <h3 style="margin-top:0">Solicitud del Encargado ingresada</h3>
       <p>N° <strong>${esc(numSol(solicitud))}</strong> · Queda
       <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
       Sigue el mismo flujo que las demás solicitudes: una vez aprobada, descárgala desde
