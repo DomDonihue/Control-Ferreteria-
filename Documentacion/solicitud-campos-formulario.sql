@@ -42,6 +42,9 @@ alter table solicitud add column if not exists pronunciamiento_juridica_url text
 
 alter table solicitud add column if not exists memo_url text;
 
+-- Solicitud de operaciones (ITO): Operaciones / Aseo y Ornato / Edificios
+alter table solicitud add column if not exists unidad_interna text;
+
 alter table solicitud_detalle add column if not exists descripcion_libre text;
 alter table solicitud_detalle add column if not exists unidad_medida_libre text;
 

@@ -916,10 +916,17 @@ async function vistaNuevaSolicitudOperaciones() {
         El N° de solicitud se genera automáticamente. Sigue el mismo flujo que las demás solicitudes:
         queda <span class="pill pendiente">pendiente</span> del V°B° del Director de Obras.</p>
 
-      <label>Unidad responsable</label>
+      <label>Dirección responsable</label>
       <select id="nso-unidad">
         <option value="">— selecciona —</option>
         ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+      </select>
+      <label>Unidad</label>
+      <select id="nso-unidad-interna">
+        <option value="">— selecciona —</option>
+        <option value="Operaciones">Operaciones</option>
+        <option value="Aseo y Ornato">Aseo y Ornato</option>
+        <option value="Edificios">Edificios</option>
       </select>
       <label>Responsable del requerimiento</label>
       <input id="nso-solicitante" value="${esc(perfilActual.nombre)}" placeholder="Nombre y cargo">
@@ -996,13 +1003,16 @@ async function guardarSolicitudOperaciones() {
     const ubicacion = val("nso-ubicacion");
     const motivo = val("nso-motivo") || "Solicitud de operaciones — Dirección de Obras";
 
-    if (!unidad_id) { mostrarError("Selecciona la unidad responsable."); return; }
+    const unidad_interna = document.getElementById("nso-unidad-interna").value;
+
+    if (!unidad_id) { mostrarError("Selecciona la dirección responsable."); return; }
+    if (!unidad_interna) { mostrarError("Selecciona la unidad (Operaciones, Aseo y Ornato o Edificios)."); return; }
     if (!solicitante) { mostrarError("Indica el responsable del requerimiento."); return; }
     if (!ubicacion) { mostrarError("Indica la ubicación de uso de los materiales."); return; }
     if (!lineasSolicitud.length) { mostrarError("Agrega al menos un material."); return; }
 
     const payload = {
-      unidad_id, solicitante, motivo, ubicacion,
+      unidad_id, unidad_interna, solicitante, motivo, ubicacion,
       fecha_solicitud: hoyISO(),
       tipo: "operaciones",
     };
@@ -1194,7 +1204,8 @@ async function vistaExpediente(id) {
       <div class="exp-datos">
         <div><div class="d-k">N° de solicitud</div>${esc(numSol(s)) || "—"}</div>
         <div><div class="d-k">Fecha</div>${s.fecha_solicitud || "—"}</div>
-        <div><div class="d-k">Unidad solicitante</div>${esc(s.unidad?.nombre) || "—"}</div>
+        <div><div class="d-k">${s.unidad_interna ? "Dirección responsable" : "Unidad solicitante"}</div>${esc(s.unidad?.nombre) || "—"}</div>
+        ${s.unidad_interna ? `<div><div class="d-k">Unidad</div>${esc(s.unidad_interna)}</div>` : ""}
         <div><div class="d-k">Responsable</div>${esc(s.solicitante) || "—"}</div>
         <div><div class="d-k">Contacto</div>${esc(s.contacto) || "—"}</div>
         <div><div class="d-k">Supervisa ejecución</div>${esc(s.supervisor) || "—"}</div>
@@ -1976,7 +1987,8 @@ async function descargarHojaPDF() {
   const fila = (k, v) => { doc.setFont("helvetica", "bold"); doc.text(k, M, y); doc.setFont("helvetica", "normal"); const lns = doc.splitTextToSize(String(v || "—"), 130); doc.text(lns, M + 46, y); y += 6 + (lns.length - 1) * 4.5; };
   fila("N° de solicitud:", numSol(s));
   fila("Fecha:", s.fecha_solicitud || hoyISO());
-  fila("Unidad solicitante:", exp.s.unidad?.nombre || "");
+  fila(s.unidad_interna ? "Dirección responsable:" : "Unidad solicitante:", exp.s.unidad?.nombre || "");
+  if (s.unidad_interna) fila("Unidad:", s.unidad_interna);
   fila("Responsable:", s.solicitante || "");
   fila("Contacto:", s.contacto || "");
   fila("Supervisa ejecución:", s.supervisor || "");
