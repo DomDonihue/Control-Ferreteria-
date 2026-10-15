@@ -291,13 +291,13 @@ async function vistaCambiarClave(obligatorio) {
   });
 }
 
-// Selector "Ver como…" en el encabezado. Para admin y para el ITO:
-// previsualiza la interfaz con los permisos de otro rol, sin tocar la BD
-// (las escrituras siguen gobernadas por RLS).
+// Selector "Ver como…" en el encabezado. Solo para el admin: previsualiza la
+// interfaz con los permisos de otro rol, sin tocar la BD (las escrituras
+// siguen gobernadas por RLS). Los demás perfiles solo ven sus pantallas.
 function montarSelectorRolVista() {
   const previo = document.getElementById("rol-vista");
   if (previo) previo.remove();
-  if (!["admin", "admin_ito"].includes(perfilActual.rol)) return;
+  if (perfilActual.rol !== "admin") return;
 
   const base = perfilActual.rol;
   const sel = document.createElement("select");
