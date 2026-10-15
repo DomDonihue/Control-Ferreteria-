@@ -384,6 +384,7 @@ const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
   { id: "nueva-operaciones", label: "Solicitudes Encargado", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaNuevaSolicitudOperaciones },
+  { id: "cotizar", label: "Solicitar cotización", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaCotizacionProveedor },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
@@ -1039,6 +1040,181 @@ async function guardarSolicitudOperaciones() {
       <strong>Expedientes</strong> para continuar con guías y factura.</p>
     </div>`;
   } finally { _unlock(); }
+}
+
+// ---------------------------------------------------------------------
+// Solicitar cotización a un proveedor (solo ITO / admin): genera un PDF para
+// pedir precio de productos que NO están en el catálogo del convenio.
+// No guarda nada en la base de datos: es solo el documento.
+// ---------------------------------------------------------------------
+let lineasCotizacion = [];
+
+function vistaCotizacionProveedor() {
+  lineasCotizacion = [];
+  vista().innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0">Solicitar cotización a proveedor</h3>
+      <p class="hint">Para productos que no están en el catálogo del convenio. Completa los datos y
+        descarga el PDF para enviarlo al proveedor. No se guarda en el sistema.</p>
+
+      <label>Proveedor</label>
+      <input id="cp-proveedor" placeholder="Razón social o nombre" autocomplete="off">
+      <label>Atención a (opcional)</label>
+      <input id="cp-atencion" placeholder="Persona de contacto del proveedor" autocomplete="off">
+
+      <h4>Productos a cotizar</h4>
+      <div id="cp-lineas"></div>
+      <div class="linea-detalle" style="grid-template-columns:3fr 1fr 1fr auto">
+        <div><label>Producto y especificaciones</label><input id="cp-desc" placeholder="Ej: marca, medidas, norma" autocomplete="off"></div>
+        <div><label>Cantidad</label><input id="cp-cant" type="number" min="0" step="0.01"></div>
+        <div><label>Unidad</label><input id="cp-un" placeholder="un, m, kg" autocomplete="off"></div>
+        <div><button class="secundario" id="cp-agregar" style="margin-top:0">+ Agregar</button></div>
+      </div>
+
+      <h4>Condiciones (opcionales)</h4>
+      <label>Lugar de entrega</label>
+      <input id="cp-lugar" placeholder="Ej: Bodega municipal, Doñihue" autocomplete="off">
+      <label>Plazo de entrega requerido</label>
+      <input id="cp-plazo" placeholder="Ej: 5 días hábiles" autocomplete="off">
+      <label>Enviar cotización hasta el</label>
+      <input id="cp-limite" type="date">
+      <label>Teléfono / correo de contacto</label>
+      <input id="cp-contacto" autocomplete="off">
+      <label>Observaciones</label>
+      <textarea id="cp-obs" rows="2"></textarea>
+
+      <button class="primario" id="cp-pdf">Descargar PDF</button>
+      <p class="error oculto" id="cp-error"></p>
+    </div>
+  `;
+
+  const pintar = () => {
+    const cont = document.getElementById("cp-lineas");
+    if (!lineasCotizacion.length) {
+      cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas productos.</p>";
+      return;
+    }
+    cont.innerHTML = `<table>
+      <tr><th>Producto y especificaciones</th><th class="num">Cantidad</th><th>Unidad</th><th></th></tr>
+      ${lineasCotizacion.map((l, i) => `<tr>
+        <td>${esc(l.descripcion)}</td><td class="num">${l.cantidad}</td><td>${esc(l.unidad) || "—"}</td>
+        <td><button class="secundario cp-quitar" data-i="${i}">Quitar</button></td>
+      </tr>`).join("")}
+    </table>`;
+    cont.querySelectorAll(".cp-quitar").forEach(b => b.addEventListener("click", () => {
+      lineasCotizacion.splice(Number(b.dataset.i), 1);
+      pintar();
+    }));
+  };
+  pintar();
+
+  document.getElementById("cp-agregar").addEventListener("click", () => {
+    const descripcion = document.getElementById("cp-desc").value.trim();
+    const cantidad = parseFloat(document.getElementById("cp-cant").value);
+    if (!descripcion || !cantidad) return;
+    lineasCotizacion.push({ descripcion, cantidad, unidad: document.getElementById("cp-un").value.trim() });
+    ["cp-desc", "cp-cant", "cp-un"].forEach(id => document.getElementById(id).value = "");
+    pintar();
+  });
+
+  document.getElementById("cp-pdf").addEventListener("click", () => {
+    const errorEl = document.getElementById("cp-error");
+    errorEl.classList.add("oculto");
+    const val = (id) => document.getElementById(id).value.trim();
+    const proveedor = val("cp-proveedor");
+    if (!proveedor) { errorEl.textContent = "Indica el proveedor."; errorEl.classList.remove("oculto"); return; }
+    if (!lineasCotizacion.length) { errorEl.textContent = "Agrega al menos un producto."; errorEl.classList.remove("oculto"); return; }
+    descargarCotizacionPDF({
+      proveedor, atencion: val("cp-atencion"), lugar: val("cp-lugar"), plazo: val("cp-plazo"),
+      limite: document.getElementById("cp-limite").value, contacto: val("cp-contacto"), obs: val("cp-obs"),
+      lineas: lineasCotizacion,
+    });
+  });
+}
+
+function descargarCotizacionPDF(d) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert("No se pudo cargar el generador de PDF. Revisa la conexión."); return; }
+  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+  const M = 18;
+  let y = M;
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+  doc.text("MUNICIPALIDAD DE DOÑIHUE", M, y);
+  doc.setFontSize(10); doc.setFont("helvetica", "normal");
+  y += 6; doc.text("Dirección de Obras — Unidad de Operaciones", M, y);
+
+  y += 12;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+  doc.text("SOLICITUD DE COTIZACIÓN", M, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+
+  y += 9;
+  const fila = (k, v) => {
+    doc.setFont("helvetica", "bold"); doc.text(k, M, y);
+    doc.setFont("helvetica", "normal");
+    const lns = doc.splitTextToSize(String(v), 130);
+    doc.text(lns, M + 40, y);
+    y += 6 + (lns.length - 1) * 4.5;
+  };
+  fila("Fecha:", hoyISO());
+  fila("Señores:", d.proveedor);
+  if (d.atencion) fila("Atención:", d.atencion);
+
+  y += 3;
+  const intro = doc.splitTextToSize(
+    "Junto con saludar, se solicita cotizar los siguientes productos, indicando precio unitario, " +
+    "total, disponibilidad y plazo de entrega.", 174);
+  doc.text(intro, M, y); y += intro.length * 5 + 4;
+
+  doc.setFont("helvetica", "bold");
+  doc.text("PRODUCTOS A COTIZAR", M, y); y += 3;
+  doc.setDrawColor(180); doc.line(M, y, 210 - M, y); y += 6;
+  doc.text("N°", M, y); doc.text("Producto y especificaciones", M + 12, y);
+  doc.text("Cantidad", 142, y); doc.text("Unidad", 168, y);
+  doc.setFont("helvetica", "normal");
+  y += 2; doc.line(M, y, 210 - M, y); y += 6;
+
+  d.lineas.forEach((l, i) => {
+    const lns = doc.splitTextToSize(l.descripcion, 105);
+    if (y + lns.length * 5 > 270) { doc.addPage(); y = M; }
+    doc.text(String(i + 1), M, y);
+    doc.text(lns, M + 12, y);
+    doc.text(String(l.cantidad), 142, y);
+    doc.text(l.unidad || "", 168, y);
+    y += Math.max(7, lns.length * 5 + 2);
+  });
+
+  const cond = [
+    d.lugar && ["Lugar de entrega:", d.lugar],
+    d.plazo && ["Plazo de entrega:", d.plazo],
+    d.limite && ["Enviar cotización hasta:", d.limite],
+    d.contacto && ["Contacto:", d.contacto],
+    d.obs && ["Observaciones:", d.obs],
+  ].filter(Boolean);
+  if (cond.length) {
+    y += 4;
+    if (y > 230) { doc.addPage(); y = M; }
+    doc.setFont("helvetica", "bold"); doc.text("CONDICIONES", M, y); y += 3;
+    doc.line(M, y, 210 - M, y); y += 6;
+    doc.setFont("helvetica", "normal");
+    cond.forEach(([k, v]) => {
+      if (y > 270) { doc.addPage(); y = M; }
+      fila(k, v);
+    });
+  }
+
+  y += 14;
+  if (y > 255) { doc.addPage(); y = M + 10; }
+  doc.line(M, y, 90, y); y += 5;
+  doc.text(perfilActual.nombre || "Encargado de Operaciones", M, y);
+  y += 5; doc.text("Encargado de Operaciones (ITO)", M, y);
+
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text("Documento generado por Control Ferretería — Municipalidad de Doñihue", M, 288);
+
+  const slug = d.proveedor.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "proveedor";
+  doc.save(`cotizacion-${slug}-${hoyISO()}.pdf`);
 }
 
 // ---------------------------------------------------------------------
