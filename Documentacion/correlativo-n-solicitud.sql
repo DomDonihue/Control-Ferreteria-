@@ -1,14 +1,16 @@
 -- =====================================================================
--- Control Ferretería — Correlativo automático de solicitudes (n_solicitud)
+-- Control Ferretería — Correlativo automático de solicitudes
 -- =====================================================================
 --
--- La columna solicitud.n_solicitud existía pero nunca se numeraba sola
--- (quedaba null salvo que alguien la llenara a mano). Este script:
---   1. Crea una secuencia y la deja como default de n_solicitud, para que
---      cada solicitud nueva (normal, especial u operaciones) reciba el
---      siguiente número automáticamente, en el orden en que se crean.
---   2. Numera las solicitudes que ya existen, en orden de creación,
---      para que también queden con su correlativo.
+-- Dos series independientes, que reinician cada año:
+--   SM-2026-001, SM-2026-002 ...  solicitudes de materiales (normales y
+--                                  especiales / fuera de catálogo)
+--   OP-2026-001, OP-2026-002 ...  solicitudes de operaciones (ITO)
+--
+-- Se guarda en solicitud.correlativo (texto). Un trigger lo asigna solo al
+-- crear la solicitud, de forma segura aunque dos personas ingresen a la vez.
+-- Las solicitudes que ya existen sin correlativo se numeran en orden de
+-- creación.
 --
 -- Es idempotente: se puede correr más de una vez sin problema.
 -- Correr UNA vez en el SQL Editor de Supabase.
@@ -16,30 +18,64 @@
 
 begin;
 
-create sequence if not exists solicitud_n_solicitud_seq;
+alter table solicitud add column if not exists correlativo text;
 
--- Numera las solicitudes existentes que aún no tienen correlativo,
--- respetando el orden de creación.
-with pendientes as (
-  select id, row_number() over (order by creado_en, id) as rn
-  from solicitud
-  where n_solicitud is null
-)
-update solicitud s
-set n_solicitud = nextval('solicitud_n_solicitud_seq')
-from pendientes p
-where s.id = p.id;
+create table if not exists correlativo_contador (
+  clave  text primary key,
+  ultimo integer not null default 0
+);
+alter table correlativo_contador enable row level security;
+-- sin políticas: solo lo toca la función (security definer), nadie desde la app.
 
--- Deja la secuencia apuntando después del máximo actual, para que las
--- solicitudes nuevas sigan el correlativo sin chocar con las de arriba.
-select setval('solicitud_n_solicitud_seq', coalesce((select max(n_solicitud) from solicitud), 0));
+create or replace function public.fn_siguiente_correlativo(p_tipo text, p_anio int)
+returns text language plpgsql security definer set search_path = public as $$
+declare
+  v_pref text := case when p_tipo = 'operaciones' then 'OP' else 'SM' end;
+  v_n    integer;
+begin
+  insert into correlativo_contador(clave, ultimo)
+  values (v_pref || '-' || p_anio, 1)
+  on conflict (clave) do update set ultimo = correlativo_contador.ultimo + 1
+  returning ultimo into v_n;
 
-alter table solicitud alter column n_solicitud set default nextval('solicitud_n_solicitud_seq');
+  return v_pref || '-' || p_anio || '-' || lpad(v_n::text, 3, '0');
+end $$;
+
+create or replace function public.fn_asignar_correlativo()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.correlativo is null or btrim(new.correlativo) = '' then
+    new.correlativo := public.fn_siguiente_correlativo(
+      new.tipo, extract(year from coalesce(new.creado_en, now()))::int);
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_asignar_correlativo on solicitud;
+create trigger trg_asignar_correlativo
+  before insert on solicitud
+  for each row execute function public.fn_asignar_correlativo();
+
+-- Numera las solicitudes que ya existen sin correlativo, en orden de creación.
+do $$
+declare r record;
+begin
+  for r in
+    select id, tipo, extract(year from creado_en)::int as anio
+    from solicitud
+    where correlativo is null or btrim(correlativo) = ''
+    order by creado_en, id
+  loop
+    update solicitud set correlativo = public.fn_siguiente_correlativo(r.tipo, r.anio)
+    where id = r.id;
+  end loop;
+end $$;
 
 commit;
 
 -- =====================================================================
 -- PRUEBA
---   Ingresa una solicitud nueva (normal u operaciones) y revisa que en
---   el listado de "Solicitudes" y en el expediente aparezca su N°.
+--   Ingresa una solicitud de materiales -> SM-AAAA-001 (o el siguiente).
+--   Ingresa una de operaciones          -> OP-AAAA-001 (serie aparte).
+--   select correlativo, tipo, creado_en from solicitud order by creado_en;
 -- =====================================================================

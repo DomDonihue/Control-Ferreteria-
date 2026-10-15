@@ -23,6 +23,8 @@ const _lock = () => (_enviando ? false : (_enviando = true));
 const _unlock = () => { _enviando = false; };
 
 const money = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
+// Número visible de una solicitud: el correlativo automático (SM-2026-001 / OP-2026-001).
+const numSol = (s) => s.correlativo || (s.n_solicitud != null ? String(s.n_solicitud) : "");
 // Escapa TODO lo que rompe HTML: se usa tanto para texto dentro de `innerHTML`
 // como para valores de atributos. Sin esto, un campo libre (motivo, ubicación,
 // descripción…) que un solicitante escribe con `<img onerror=…>` corre como
@@ -598,10 +600,9 @@ async function vistaNuevaSolicitud() {
       </div>
 
       <h4>1. Identificación del requerimiento</h4>
-      <div class="linea-detalle" style="grid-template-columns:1fr 1fr">
-        <div><label>N° de solicitud / correlativo</label><input id="ns-correlativo" placeholder="Ej: 2026-045"></div>
-        <div><label>Fecha de solicitud</label><input id="ns-fecha" type="date" value="${hoyISO()}"></div>
-      </div>
+      <label>Fecha de solicitud</label>
+      <input id="ns-fecha" type="date" value="${hoyISO()}">
+      <p class="hint">El N° de solicitud (SM-AAAA-001) se asigna solo al ingresarla.</p>
       <label>Unidad solicitante</label>
       <select id="ns-unidad">
         <option value="">— selecciona —</option>
@@ -758,7 +759,6 @@ async function leerFormularioPDF(file) {
     const num = (v) => parseFloat(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) || 0;
     const fecha = (v) => { const m = String(v).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/); return m ? `${m[3].padStart(4, "20")}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
 
-    set("ns-correlativo", T("num_solicitud"));
     set("ns-fecha", fecha(T("fecha_solicitud")));
     set("ns-solicitante", T("responsable_requerimiento"));
     set("ns-contacto", T("contacto"));
@@ -845,7 +845,6 @@ async function guardarSolicitud() {
 
   const payload = {
     unidad_id, solicitante, motivo, ubicacion,
-    correlativo: val("ns-correlativo") || null,
     fecha_solicitud: document.getElementById("ns-fecha").value || null,
     contacto: val("ns-contacto") || null,
     supervisor: val("ns-supervisor") || null,
@@ -887,7 +886,7 @@ async function guardarSolicitud() {
   actualizarNotificaciones();
   vista().innerHTML = `<div class="card">
     <h3 style="margin-top:0">Solicitud ingresada${fuera_catalogo ? " (especial)" : ""}</h3>
-    <p>Queda <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
+    <p>${numSol(solicitud) ? `N° <strong>${esc(numSol(solicitud))}</strong> · ` : ""}Queda <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
     ${fuera_catalogo
       ? `Al ser <strong>fuera de catálogo</strong>, en su expediente (pestaña <strong>Expedientes</strong>)
          deberás cargar la justificación de la Unidad Jurídica y de la DAF, la cotización y la
@@ -1024,7 +1023,7 @@ async function guardarSolicitudOperaciones() {
     actualizarNotificaciones();
     vista().innerHTML = `<div class="card">
       <h3 style="margin-top:0">Solicitud de operaciones ingresada</h3>
-      <p>N° ${solicitud.n_solicitud ? esc(String(solicitud.n_solicitud)) : ""} · Queda
+      <p>N° <strong>${esc(numSol(solicitud))}</strong> · Queda
       <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
       Sigue el mismo flujo que las demás solicitudes: una vez aprobada, descárgala desde
       <strong>Expedientes</strong> para continuar con guías y factura.</p>
@@ -1046,7 +1045,7 @@ async function vistaSolicitudes() {
   const { data, error } = await sb
     .from("solicitud")
     .select("*, unidad(nombre), obra(nombre)")
-    .order("n_solicitud", { ascending: false });
+    .order("creado_en", { ascending: false });
 
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
@@ -1058,7 +1057,7 @@ async function vistaSolicitudes() {
         <tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th><th>Estado</th><th></th></tr>
         ${(data.length ? data : []).map(s => `
           <tr>
-            <td class="num">${s.n_solicitud ?? "—"}</td>
+            <td class="num">${esc(numSol(s)) || "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
             <td>
@@ -1104,7 +1103,7 @@ async function subirArchivo(bucket, file) {
 async function vistaExpedientes(filtroUnidad) {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
   const [{ data: solsTodas, error }, { data: guias }, { data: facturas }] = await Promise.all([
-    sb.from("solicitud").select("*, unidad(nombre)").order("n_solicitud", { ascending: false }),
+    sb.from("solicitud").select("*, unidad(nombre)").order("creado_en", { ascending: false }),
     sb.from("guia_despacho").select("solicitud_id, monto_bruto"),
     sb.from("factura").select("solicitud_id, monto_bruto"),
   ]);
@@ -1126,7 +1125,7 @@ async function vistaExpedientes(filtroUnidad) {
           const totalBruto = f.length ? f.reduce((a, x) => a + Number(x.monto_bruto || 0), 0)
                                       : g.reduce((a, x) => a + Number(x.monto_bruto || 0), 0);
           return `<tr>
-            <td class="num">${s.n_solicitud ?? "—"}</td>
+            <td class="num">${esc(numSol(s)) || "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}</td>
             <td>${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}</td>
@@ -1184,7 +1183,7 @@ async function vistaExpediente(id) {
     <div class="card">
       <div class="exp-cabecera">
         <div>
-          <h3 style="margin:0">Solicitud ${s.n_solicitud ? "N° " + esc(s.n_solicitud) : ""}</h3>
+          <h3 style="margin:0">Solicitud ${numSol(s) ? "N° " + esc(numSol(s)) : ""}</h3>
           <div class="hint">${s.fecha_solicitud || ""} · ${esc(s.unidad?.nombre)}</div>
         </div>
         <div style="display:flex;gap:.4rem;align-items:center">
@@ -1193,7 +1192,7 @@ async function vistaExpediente(id) {
         </div>
       </div>
       <div class="exp-datos">
-        <div><div class="d-k">Correlativo</div>${esc(s.correlativo) || (s.n_solicitud ? "N° " + esc(s.n_solicitud) : "—")}</div>
+        <div><div class="d-k">N° de solicitud</div>${esc(numSol(s)) || "—"}</div>
         <div><div class="d-k">Fecha</div>${s.fecha_solicitud || "—"}</div>
         <div><div class="d-k">Unidad solicitante</div>${esc(s.unidad?.nombre) || "—"}</div>
         <div><div class="d-k">Responsable</div>${esc(s.solicitante) || "—"}</div>
@@ -1970,12 +1969,12 @@ async function descargarHojaPDF() {
   const especial = s.tipo === "especial";
   y += 10;
   doc.setFont("helvetica", "bold"); doc.setFontSize(13);
-  doc.text(`${especial ? "SOLICITUD DE COTIZACIÓN" : "SOLICITUD DE MATERIALES"}${s.n_solicitud ? "  N° " + s.n_solicitud : ""}`, M, y);
+  doc.text(`${especial ? "SOLICITUD DE COTIZACIÓN" : "SOLICITUD DE MATERIALES"}${numSol(s) ? "  N° " + numSol(s) : ""}`, M, y);
   doc.setFont("helvetica", "normal"); doc.setFontSize(10);
 
   y += 9;
   const fila = (k, v) => { doc.setFont("helvetica", "bold"); doc.text(k, M, y); doc.setFont("helvetica", "normal"); const lns = doc.splitTextToSize(String(v || "—"), 130); doc.text(lns, M + 46, y); y += 6 + (lns.length - 1) * 4.5; };
-  fila("Correlativo:", s.correlativo || (s.n_solicitud ? "N° " + s.n_solicitud : ""));
+  fila("N° de solicitud:", numSol(s));
   fila("Fecha:", s.fecha_solicitud || hoyISO());
   fila("Unidad solicitante:", exp.s.unidad?.nombre || "");
   fila("Responsable:", s.solicitante || "");
@@ -2017,7 +2016,7 @@ async function descargarHojaPDF() {
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text("Documento generado por Control Ferretería — Municipalidad de Doñihue", M, 288);
 
-  const nombre = `solicitud-${s.n_solicitud || s.id.slice(0, 8)}.pdf`;
+  const nombre = `solicitud-${numSol(s) || s.id.slice(0, 8)}.pdf`;
   doc.save(nombre);
 }
 
