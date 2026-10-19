@@ -581,6 +581,33 @@ function svgSolicitudesPorMes(solicitudes) {
 let lineasSolicitud = [];
 let catalogoPorDesc = new Map(); // descripción normalizada → fila de `articulo` (para autocompletar unidad/artículo)
 
+// Buscador del catálogo: filtra mientras se escribe (sin tildes, todas las
+// palabras) y deja elegir de la lista. El contrato es solo por catálogo.
+function montarBuscadorMaterial(inputId, resId, articulos) {
+  const input = document.getElementById(inputId);
+  const res = document.getElementById(resId);
+  const norm = (t) => (t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const indice = articulos.map(a => ({ a, d: norm(a.descripcion) }));
+
+  const pintar = () => {
+    const palabras = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!palabras.length) { res.classList.add("oculto"); return; }
+    const hits = indice.filter(x => palabras.every(p => x.d.includes(p))).slice(0, 10);
+    res.innerHTML = hits.length
+      ? hits.map((x, i) => `<button type="button" data-i="${i}">${esc(x.a.descripcion)}${x.a.unidad_medida ? ` <span class="hint">· ${esc(x.a.unidad_medida)}</span>` : ""}</button>`).join("")
+      : `<div class="vacio">Sin resultados en el catálogo del contrato.</div>`;
+    res.classList.remove("oculto");
+    res.querySelectorAll("button").forEach(b => b.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      input.value = hits[Number(b.dataset.i)].a.descripcion;
+      res.classList.add("oculto");
+    }));
+  };
+  input.addEventListener("input", pintar);
+  input.addEventListener("focus", pintar);
+  input.addEventListener("blur", () => res.classList.add("oculto"));
+}
+
 async function vistaNuevaSolicitud() {
   const [{ data: articulos }, { data: unidades }] = await Promise.all([
     sb.from("articulo").select("id, descripcion, unidad_medida").order("descripcion"),
@@ -632,11 +659,11 @@ async function vistaNuevaSolicitud() {
       <p class="hint">Solo material y cantidad. Los valores llegan después en las guías de despacho.</p>
       <div id="ns-lineas"></div>
       <div class="linea-detalle" style="grid-template-columns:3fr 1fr auto">
-        <div><label>Material</label><input id="ns-mat" list="ns-catalogo" placeholder="Elige del catálogo" autocomplete="off"></div>
+        <div class="buscador"><label>Material (buscar en el catálogo)</label><input id="ns-mat" placeholder="Escribe para buscar…" autocomplete="off"><div id="ns-mat-res" class="buscador-res oculto"></div></div>
         <div><label>Cantidad</label><input id="ns-cant" type="number" min="0" step="0.01"></div>
         <div><button class="secundario" id="ns-agregar" style="margin-top:0">+ Agregar</button></div>
       </div>
-      <datalist id="ns-catalogo">${(articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("")}</datalist>
+      <p class="error oculto" id="ns-mat-msg"></p>
 
       <h4>4. Respaldos adjuntos</h4>
 
@@ -694,13 +721,22 @@ async function vistaNuevaSolicitud() {
     (articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a])
   );
 
+  montarBuscadorMaterial("ns-mat", "ns-mat-res", articulos || []);
+
   document.getElementById("ns-agregar").addEventListener("click", () => {
     const mat = document.getElementById("ns-mat").value.trim();
     const cant = parseFloat(document.getElementById("ns-cant").value);
+    const msg = document.getElementById("ns-mat-msg");
+    msg.classList.add("oculto");
     if (!mat || !cant) return;
     const art = catalogoPorDesc.get(mat.toLowerCase());
+    if (!art && !document.getElementById("ns-fuera-catalogo").checked) {
+      msg.textContent = "Ese producto no está en el catálogo del contrato. Búscalo y elígelo de la lista (o marca \"fuera de catálogo\" en el punto 5).";
+      msg.classList.remove("oculto");
+      return;
+    }
     lineasSolicitud.push({
-      descripcion: mat,
+      descripcion: art ? art.descripcion : mat,
       articulo_id: art ? art.id : null,
       cantidad_solicitada: cant,
       unidad_medida: (art && art.unidad_medida) || "",
@@ -939,11 +975,11 @@ async function vistaNuevaSolicitudOperaciones() {
       <h4>Detalle de materiales</h4>
       <div id="nso-lineas"></div>
       <div class="linea-detalle" style="grid-template-columns:3fr 1fr auto">
-        <div><label>Material</label><input id="nso-mat" list="nso-catalogo" placeholder="Elige del catálogo" autocomplete="off"></div>
+        <div class="buscador"><label>Material (buscar en el catálogo)</label><input id="nso-mat" placeholder="Escribe para buscar…" autocomplete="off"><div id="nso-mat-res" class="buscador-res oculto"></div></div>
         <div><label>Cantidad</label><input id="nso-cant" type="number" min="0" step="0.01"></div>
         <div><button class="secundario" id="nso-agregar" style="margin-top:0">+ Agregar</button></div>
       </div>
-      <datalist id="nso-catalogo"></datalist>
+      <p class="error oculto" id="nso-mat-msg"></p>
 
       <button class="primario" id="nso-guardar">Ingresar solicitud</button>
       <p class="error oculto" id="nso-error"></p>
@@ -952,8 +988,7 @@ async function vistaNuevaSolicitudOperaciones() {
 
   const { data: articulos } = await sb.from("articulo").select("id, descripcion, unidad_medida").order("descripcion");
   catalogoPorDesc = new Map((articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a]));
-  document.getElementById("nso-catalogo").innerHTML =
-    (articulos || []).map(a => `<option value="${esc(a.descripcion)}"></option>`).join("");
+  montarBuscadorMaterial("nso-mat", "nso-mat-res", articulos || []);
 
   const pintarLineasNso = () => {
     const cont = document.getElementById("nso-lineas");
@@ -966,7 +1001,7 @@ async function vistaNuevaSolicitudOperaciones() {
       ${lineasSolicitud.map((l, i) => `<tr>
           <td>${esc(l.descripcion)}</td>
           <td class="num">${l.cantidad_solicitada}</td>
-          <td><button class="secundario" onclick="quitarLinea(${i});pintarLineasNsoGlobal()">Quitar</button></td>
+          <td><button class="secundario" onclick="lineasSolicitud.splice(${i},1);pintarLineasNsoGlobal()">Quitar</button></td>
         </tr>`).join("")}
     </table>`;
   };
@@ -975,13 +1010,20 @@ async function vistaNuevaSolicitudOperaciones() {
   document.getElementById("nso-agregar").addEventListener("click", () => {
     const mat = document.getElementById("nso-mat").value.trim();
     const cant = parseFloat(document.getElementById("nso-cant").value);
+    const msg = document.getElementById("nso-mat-msg");
+    msg.classList.add("oculto");
     if (!mat || !cant) return;
     const art = catalogoPorDesc.get(mat.toLowerCase());
+    if (!art) {
+      msg.textContent = "Ese producto no está en el catálogo del contrato. Búscalo y elígelo de la lista.";
+      msg.classList.remove("oculto");
+      return;
+    }
     lineasSolicitud.push({
-      descripcion: mat,
-      articulo_id: art ? art.id : null,
+      descripcion: art.descripcion,
+      articulo_id: art.id,
       cantidad_solicitada: cant,
-      unidad_medida: (art && art.unidad_medida) || "",
+      unidad_medida: art.unidad_medida || "",
     });
     ["nso-mat", "nso-cant"].forEach(id => document.getElementById(id).value = "");
     pintarLineasNso();
