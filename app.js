@@ -388,7 +388,7 @@ const TABS = [
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
-  { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin"], render: vistaCatalogo },
+  { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin", "admin_ito"], render: vistaCatalogo },
   { id: "convenio", label: "Convenio / ferretería", grupo: "Administración", icono: "convenio", roles: ["admin"], render: vistaConvenio },
   { id: "usuarios", label: "Usuarios", grupo: "Administración", icono: "usuarios", roles: ["admin"], render: vistaUsuarios },
   { id: "clave", label: "Cambiar clave", grupo: "Mi cuenta", icono: "clave", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: () => vistaCambiarClave(false) },
