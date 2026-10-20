@@ -618,7 +618,7 @@ function montarBuscadorMaterial(inputId, resId, articulos) {
 
 async function vistaNuevaSolicitud() {
   const [{ data: articulos }, { data: unidades }] = await Promise.all([
-    sb.from("articulo").select("id, descripcion, unidad_medida, precio_neto").not("item", "is", null).order("descripcion"),
+    sb.from("articulo").select("id, descripcion, unidad_medida, precio_neto").order("descripcion"),
     sb.from("unidad").select("id, nombre").order("nombre"),
   ]);
   lineasSolicitud = [];
@@ -1003,7 +1003,7 @@ async function vistaNuevaSolicitudOperaciones() {
     </div>
   `;
 
-  const { data: articulos } = await sb.from("articulo").select("id, descripcion, unidad_medida, precio_neto").not("item", "is", null).order("descripcion");
+  const { data: articulos } = await sb.from("articulo").select("id, descripcion, unidad_medida, precio_neto").order("descripcion");
   catalogoPorDesc = new Map((articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a]));
   montarBuscadorMaterial("nso-mat", "nso-mat-res", articulos || []);
 
@@ -2511,27 +2511,21 @@ async function vistaCatalogo() {
 
   const { data: articulos, error } = await sb
     .from("articulo")
-    .select("id, descripcion, unidad_medida, item, precio_neto");
+    .select("id, descripcion, unidad_medida, item, marca, precio_neto")
+    .order("descripcion");
 
   if (error) {
     vista().innerHTML = `<div class="card error">No se pudo leer el catálogo: ${error.message}
       <br><small>Falta la política RLS que deja al rol 'admin' escribir en la tabla 'articulo' (ver README).</small></div>`;
     return;
   }
-  // Una sola lista, en el orden del listado del contrato (1.1, 1.2 … 1.10 …); los sin N° al final.
-  const clave = (a) => a.item ? a.item.split(".").map(n => String(n).padStart(3, "0")).join(".") : "zzz";
-  (articulos || []).sort((a, b) => clave(a).localeCompare(clave(b)) || (a.descripcion || "").localeCompare(b.descripcion || ""));
-  const fueraDeLista = (articulos || []).filter(a => !a.item).length;
 
   vista().innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">Agregar artículo al catálogo</h3>
-      <p class="hint" style="margin-top:0">El catálogo es una sola lista: N°, detalle y precio unitario neto del contrato. Un producto sin N° no se ofrece en las solicitudes.</p>
-      <div class="linea-detalle" style="grid-template-columns:1fr 3fr 1fr ${esAdminTotal() ? "1fr " : ""}auto">
-        <div><label>N°</label><input id="ca-item" placeholder="Ej: 3.6"></div>
-        <div><label>Detalle</label><input id="ca-desc" placeholder="Ej: Cemento portland 25 kg"></div>
+      <div class="linea-detalle" style="grid-template-columns:2fr 1fr auto">
+        <div><label>Descripción</label><input id="ca-desc" placeholder="Ej: Cemento portland 25 kg"></div>
         <div><label>Unidad de medida</label><input id="ca-um" placeholder="saco, unidad, m, kg…"></div>
-        ${esAdminTotal() ? `<div><label>Precio neto</label><input id="ca-precio" type="number" min="0" step="1"></div>` : ""}
         <div><button class="primario" id="ca-agregar" style="margin-top:0">+ Agregar</button></div>
       </div>
       <p class="error oculto" id="ca-error"></p>
@@ -2539,15 +2533,15 @@ async function vistaCatalogo() {
 
     <div class="card">
       <h3 style="margin-top:0">Artículos (${(articulos || []).length})</h3>
-      ${fueraDeLista ? `<p class="hint" style="color:var(--warn)">${fueraDeLista} producto(s) sin N° (al final): no están en el listado del contrato y no se ofrecen en las solicitudes.</p>` : ""}
       <table>
-        <thead><tr><th>N°</th><th>Detalle</th><th>U. medida</th><th class="num">Precio unitario neto</th><th></th></tr></thead>
+        <thead><tr><th>N°</th><th>Descripción</th><th>U. medida</th><th>Marca</th><th class="num">Precio neto</th><th></th></tr></thead>
         <tbody>
           ${(articulos || []).map(a => `
             <tr data-id="${a.id}">
               <td>${esc(a.item) || "—"}</td>
               <td><input class="ca-r-desc" value="${esc(a.descripcion)}"></td>
               <td><input class="ca-r-um" value="${esc(a.unidad_medida)}"></td>
+              <td>${esc(a.marca) || "—"}</td>
               <td class="num">${esAdminTotal()
                 ? `<input class="ca-r-precio" type="number" min="0" step="1" value="${a.precio_neto ?? ""}" style="width:7rem;text-align:right">`
                 : (a.precio_neto == null ? "—" : money(a.precio_neto))}</td>
@@ -2562,20 +2556,16 @@ async function vistaCatalogo() {
   `;
 
   document.getElementById("ca-agregar").addEventListener("click", async () => {
-    const item = document.getElementById("ca-item").value.trim();
     const descripcion = document.getElementById("ca-desc").value.trim();
     const unidad_medida = document.getElementById("ca-um").value.trim();
     const errorEl = document.getElementById("ca-error");
     errorEl.classList.add("oculto");
-    if (!item || !descripcion || !unidad_medida) {
-      errorEl.textContent = "Completa N°, detalle y unidad de medida.";
+    if (!descripcion || !unidad_medida) {
+      errorEl.textContent = "Completa descripción y unidad de medida.";
       errorEl.classList.remove("oculto");
       return;
     }
-    const nuevo = { item, descripcion, unidad_medida };
-    const inpPrecio = document.getElementById("ca-precio");
-    if (inpPrecio && inpPrecio.value !== "") nuevo.precio_neto = Number(inpPrecio.value);
-    const { error: errIns } = await sb.from("articulo").insert(nuevo);
+    const { error: errIns } = await sb.from("articulo").insert({ descripcion, unidad_medida });
     if (errIns) { errorEl.textContent = "No se pudo agregar: " + errIns.message; errorEl.classList.remove("oculto"); return; }
     vistaCatalogo();
   });
