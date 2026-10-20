@@ -968,13 +968,6 @@ async function vistaNuevaSolicitudOperaciones() {
           : `Al ingresarla pasa directo al V°B° del Director de Obras.`}</p>
       ${soloObras && !unidades.length ? `<p class="error">Tu perfil no tiene una dirección asignada. Pide al administrador que te la asigne en Usuarios.</p>` : ""}
 
-      <div style="border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin:12px 0;background:var(--surface-2)">
-        <label style="margin-top:0">¿Tienes el Formulario Único en PDF editable? Cárgalo y se autocompleta</label>
-        <input id="nso-pdf" type="file" accept="application/pdf">
-        <p class="hint" id="nso-pdf-msg">Lee dirección, unidad, responsable, ubicación y motivo. Los materiales los eliges tú del catálogo.</p>
-        <div id="nso-pdf-mats"></div>
-      </div>
-
       <label>Dirección responsable</label>
       <select id="nso-unidad" ${soloObras ? "disabled" : ""}>
         ${soloObras ? "" : `<option value="">— selecciona —</option>`}
@@ -1051,56 +1044,8 @@ async function vistaNuevaSolicitudOperaciones() {
     pintarLineasNso();
   });
 
-  document.getElementById("nso-pdf").addEventListener("change", (e) => {
-    if (e.target.files[0]) leerFormularioPDFOperaciones(e.target.files[0]);
-  });
   document.getElementById("nso-guardar").addEventListener("click", guardarSolicitudOperaciones);
   pintarLineasNso();
-}
-
-// Lee el Formulario Único (PDF editable) y autocompleta la solicitud del
-// Encargado. Los materiales NO se agregan solos: el contrato es solo por
-// catálogo, así que se listan como referencia y se eligen con el buscador.
-async function leerFormularioPDFOperaciones(file) {
-  const msg = document.getElementById("nso-pdf-msg");
-  const mats = document.getElementById("nso-pdf-mats");
-  mats.innerHTML = "";
-  if (!window.PDFLib) { msg.textContent = "No se pudo cargar el lector de PDF (revisa la conexión)."; return; }
-  msg.textContent = "Leyendo el PDF…";
-  try {
-    const doc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
-    const form = doc.getForm();
-    const T = (n) => { try { return (form.getTextField(n).getText() || "").trim(); } catch { return ""; } };
-    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
-    const norm = (t) => (t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-
-    set("nso-solicitante", T("responsable_requerimiento"));
-    set("nso-ubicacion", T("ubicacion_uso"));
-    set("nso-motivo", T("fundamento") || T("desc_requerimiento"));
-
-    const unTxt = norm(T("unidad_solicitante"));
-    if (unTxt) {
-      const calza = (sel) => [...sel.options].find(o => o.value && (norm(o.textContent).includes(unTxt) || unTxt.includes(norm(o.textContent))));
-      const dir = calza(document.getElementById("nso-unidad"));
-      if (dir) document.getElementById("nso-unidad").value = dir.value;
-      const uni = calza(document.getElementById("nso-unidad-interna"));
-      if (uni) document.getElementById("nso-unidad-interna").value = uni.value;
-    }
-
-    const referencia = [];
-    for (let r = 0; r < 8; r++) {
-      const m = T(`mat_r${r}_c0`);
-      if (m) referencia.push([m, T(`mat_r${r}_c1`), T(`mat_r${r}_c2`)]);
-    }
-    if (referencia.length) {
-      mats.innerHTML = `<p class="hint" style="margin-bottom:4px">Materiales del PDF (agrégalos buscándolos en el catálogo, punto "Detalle de materiales"):</p>
-        <ul class="hint" style="margin:0 0 0 18px">${referencia.map(([m, c, u]) => `<li>${esc(m)}${c ? " · " + esc(c) : ""}${u ? " " + esc(u) : ""}</li>`).join("")}</ul>`;
-    }
-
-    msg.textContent = "Formulario autocompletado desde el PDF. Revisa los datos y elige la dirección/unidad si no se reconocieron.";
-  } catch (e) {
-    msg.textContent = "No se pudo leer el PDF: " + e.message + ". Llena el formulario a mano.";
-  }
 }
 
 async function guardarSolicitudOperaciones() {
