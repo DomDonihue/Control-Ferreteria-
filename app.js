@@ -1375,7 +1375,7 @@ async function vistaSolicitudes() {
               ${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
-            <td><span class="pill ${s.estado}">${s.estado}</span></td>
+            <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}</td>
             <td>${accionesSolicitud(s)}</td>
           </tr>
         `).join("")}
@@ -1406,6 +1406,11 @@ async function resolverSolicitud(id, estado, etapa) {
   const cambios = etapa === "ito"
     ? { estado, visado_por: perfilActual.id, visado_en: new Date().toISOString() }
     : { estado, aprobado_por: perfilActual.id };
+  if (estado === "rechazada") {
+    const motivo = (prompt("Motivo del rechazo (obligatorio, lo verá quien hizo la solicitud):") || "").trim();
+    if (!motivo) return;
+    cambios.motivo_rechazo = motivo;
+  }
   const { error } = await sb.from("solicitud").update(cambios).eq("id", id);
   if (error) { alert("No se pudo actualizar la solicitud: " + error.message); return; }
   actualizarNotificaciones();
@@ -1530,6 +1535,7 @@ async function vistaExpediente(id) {
         <div><div class="d-k">Ubicación de uso</div>${esc(s.ubicacion) || "—"}</div>
         <div><div class="d-k">Memo de solicitud</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
         <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+        ${s.estado === "rechazada" && s.motivo_rechazo ? `<div><div class="d-k">Motivo del rechazo</div>${esc(s.motivo_rechazo)}</div>` : ""}
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Descripción y justificación técnica</h4></div>
