@@ -391,7 +391,7 @@ const ICONOS = {
 const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
-  { id: "nueva-operaciones", label: "Solicitudes Encargado", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaNuevaSolicitudOperaciones },
+  { id: "nueva-operaciones", label: "Solicitud Obras", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaNuevaSolicitudOperaciones },
   { id: "cotizar", label: "Solicitar cotización", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaCotizacionProveedor },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
@@ -960,7 +960,7 @@ async function vistaNuevaSolicitudOperaciones() {
 
   vista().innerHTML = `
     <div class="card">
-      <h3 style="margin-top:0">Solicitudes Encargado — Dirección de Obras</h3>
+      <h3 style="margin-top:0">Solicitud Obras — Dirección de Obras</h3>
       <p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras
         (Operaciones, Aseo y Ornato, Edificios). El N° de solicitud se genera automáticamente.
         ${soloObras
@@ -1099,7 +1099,7 @@ async function guardarSolicitudOperaciones() {
 
     actualizarNotificaciones();
     vista().innerHTML = `<div class="card">
-      <h3 style="margin-top:0">Solicitud del Encargado ingresada</h3>
+      <h3 style="margin-top:0">Solicitud de Obras ingresada</h3>
       <p>N° <strong>${esc(numSol(solicitud))}</strong> · ${porRevisar
         ? `Queda <span class="pill pendiente">pendiente</span> de la revisión del ITO; con su V°B° pasará al Director de Obras para su aprobación.`
         : `Queda <span class="pill visada">visada</span> y espera la aprobación del Director de Obras.`}
@@ -1292,7 +1292,7 @@ function descargarCotizacionPDF(d) {
 // ---------------------------------------------------------------------
 function pillTipoSolicitud(tipo) {
   if (tipo === "especial") return `<span class="pill enviada">especial</span> `;
-  if (tipo === "operaciones") return `<span class="pill enviada">operaciones DOM</span> `;
+  if (tipo === "operaciones") return `<span class="pill enviada">Obras</span> `;
   return "";
 }
 

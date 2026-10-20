@@ -3,7 +3,7 @@
 -- =====================================================================
 --
 -- Flujo de las solicitudes de la Dirección de Obras (tipo 'operaciones',
--- formulario "Solicitudes Encargado"):
+-- formulario "Solicitud Obras"):
 --
 --   usuario de Obras (rol solicitante_obras) crea        -> pendiente
 --   ITO revisa y da su V°B°                              -> visada
@@ -117,7 +117,7 @@ commit;
 
 -- =====================================================================
 -- PRUEBA
---   1. Con un usuario solicitante_obras: "Solicitudes Encargado" -> ingresar
+--   1. Con un usuario solicitante_obras: "Solicitud Obras" -> ingresar
 --      una solicitud. Debe quedar 'pendiente' con la dirección fija.
 --   2. Como ITO: en "Solicitudes" aparece con "Dar V°B°" -> pasa a 'visada'.
 --   3. Como Director: aparece con "Aprobar" solo cuando está 'visada'.
