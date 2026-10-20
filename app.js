@@ -1421,6 +1421,22 @@ async function vistaExpedientes(filtroUnidad) {
 
 function abrirExpediente(id) { editarFacturaId = null; vistaExpediente(id); }
 
+// Precio unitario neto del artículo (listado de precios del contrato) y total
+// de lo solicitado. Los productos sin precio se avisan y no suman.
+function valorUnitarioNeto(d) {
+  const p = d.articulo?.precio_neto;
+  return p == null || p === "" ? null : Number(p);
+}
+function totalesDetalle(detalle) {
+  let neto = 0, sinValor = 0;
+  (detalle || []).forEach(d => {
+    const p = valorUnitarioNeto(d);
+    if (p == null) sinValor++; else neto += p * Number(d.cantidad_solicitada || 0);
+  });
+  const iva = Math.round(neto * 0.19);
+  return { neto, iva, bruto: neto + iva, sinValor };
+}
+
 // ---------- Detalle de un expediente ----------
 let editarFacturaId = null;
 
@@ -1428,7 +1444,7 @@ async function vistaExpediente(id) {
   vista().innerHTML = "<div class='card'>Cargando expediente…</div>";
   const [{ data: s, error }, { data: detalle }, { data: guias }, { data: facturas }, { data: cotizaciones }, { data: notasCredito }, { data: comprasSol }, { data: bitacoraRows }] = await Promise.all([
     sb.from("solicitud").select("*, unidad(nombre), obra(nombre)").eq("id", id).single(),
-    sb.from("solicitud_detalle").select("cantidad_solicitada, descripcion_libre, articulo(descripcion, unidad_medida)").eq("solicitud_id", id),
+    sb.from("solicitud_detalle").select("cantidad_solicitada, descripcion_libre, unidad_medida_libre, articulo(descripcion, unidad_medida, precio_neto)").eq("solicitud_id", id),
     sb.from("guia_despacho").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
     sb.from("factura").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
     sb.from("cotizacion").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
@@ -1492,14 +1508,27 @@ async function vistaExpediente(id) {
       </div>
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Materiales solicitados</h4></div>
-      <table>
-        <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th></tr>
-        ${(detalle || []).map(d => `<tr>
+      ${(() => {
+        const conValor = !especial && (detalle || []).some(d => valorUnitarioNeto(d) != null);
+        const tot = totalesDetalle(detalle);
+        return `<table>
+        <tr><th>Material</th><th class="num">Cantidad</th><th>Unidad</th>${conValor ? `<th class="num">Valor unit. neto</th><th class="num">Subtotal neto</th>` : ""}</tr>
+        ${(detalle || []).map(d => {
+          const p = valorUnitarioNeto(d);
+          return `<tr>
           <td>${esc(d.articulo?.descripcion || d.descripcion_libre)}</td>
           <td class="num">${d.cantidad_solicitada}</td>
           <td>${esc(d.unidad_medida_libre || d.articulo?.unidad_medida) || "—"}</td>
-        </tr>`).join("")}
+          ${conValor ? `<td class="num">${p == null ? "—" : money(p)}</td><td class="num">${p == null ? "—" : money(p * Number(d.cantidad_solicitada || 0))}</td>` : ""}
+        </tr>`;
+        }).join("")}
+        ${conValor ? `
+          <tr><td colspan="4" style="text-align:right">Total neto</td><td class="num">${money(tot.neto)}</td></tr>
+          <tr><td colspan="4" style="text-align:right">IVA 19%</td><td class="num">${money(tot.iva)}</td></tr>
+          <tr><td colspan="4" style="text-align:right;font-weight:700">Total estimado</td><td class="num" style="font-weight:700">${money(tot.bruto)}</td></tr>` : ""}
       </table>
+      ${conValor ? `<p class="hint" style="margin-top:.4rem">Valores netos según el listado de precios del contrato. Es un monto estimado: el valor final se verifica con la guía de despacho y la factura.${tot.sinValor ? ` ${tot.sinValor} línea(s) sin valor no están incluidas en el total.` : ""}</p>` : ""}`;
+      })()}
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Respaldos y situaciones especiales</h4></div>
       <p class="hint" style="margin-top:0">
@@ -2279,21 +2308,52 @@ async function descargarHojaPDF() {
   doc.text("MATERIALES SOLICITADOS", M, y); y += 3;
   doc.setDrawColor(180); doc.line(M, y, 210 - M, y); y += 6;
 
+  // Con precios (listado del contrato) se agregan Valor unitario y Subtotal por
+  // ítem y el total; la solicitud de cotización (fuera de catálogo) no los lleva.
+  const conValor = !especial && (detalle || []).some(d => valorUnitarioNeto(d) != null);
+  const R = 210 - M; // borde derecho
+  const xCant = conValor ? 112 : 140, xUni = conValor ? 123 : 172, anchoMat = conValor ? 78 : 108;
+  const derecha = (txt, x) => doc.text(String(txt), x, y, { align: "right" });
+
   doc.text("N°", M, y);
-  doc.text("Material", M + 12, y);
-  doc.text("Cantidad", 140, y);
-  doc.text("Unidad", 172, y);
+  doc.text("Material", M + 9, y);
+  if (conValor) derecha("Cantidad", xCant + 6); else doc.text("Cantidad", xCant, y);
+  doc.text("Unidad", xUni, y);
+  if (conValor) { derecha("Valor unit.", 160); derecha("Subtotal", R); }
   doc.setFont("helvetica", "normal");
-  y += 2; doc.line(M, y, 210 - M, y); y += 6;
+  y += 2; doc.line(M, y, R, y); y += 6;
 
   (detalle || []).forEach((d, i) => {
-    if (y > 265) { doc.addPage(); y = M; }
+    const lns = doc.splitTextToSize(String(d.articulo?.descripcion || d.descripcion_libre || ""), anchoMat);
+    const alto = Math.max(7, lns.length * 4.6 + 2.4);
+    if (y + alto > 265) { doc.addPage(); y = M; }
     doc.text(String(i + 1), M, y);
-    doc.text(doc.splitTextToSize(String(d.articulo?.descripcion || d.descripcion_libre || ""), 120), M + 12, y);
-    doc.text(String(d.cantidad_solicitada ?? ""), 140, y);
-    doc.text(String(d.unidad_medida_libre || d.articulo?.unidad_medida || ""), 172, y);
-    y += 7;
+    doc.text(lns, M + 9, y);
+    if (conValor) derecha(d.cantidad_solicitada ?? "", xCant + 6); else doc.text(String(d.cantidad_solicitada ?? ""), xCant, y);
+    doc.text(String(d.unidad_medida_libre || d.articulo?.unidad_medida || ""), xUni, y);
+    if (conValor) {
+      const p = valorUnitarioNeto(d);
+      derecha(p == null ? "—" : money(p), 160);
+      derecha(p == null ? "—" : money(p * Number(d.cantidad_solicitada || 0)), R);
+    }
+    y += alto;
   });
+
+  if (conValor) {
+    const tot = totalesDetalle(detalle);
+    if (y > 235) { doc.addPage(); y = M; }
+    doc.line(M, y - 3, R, y - 3); y += 3;
+    doc.text("Total neto", 160, y, { align: "right" }); derecha(money(tot.neto), R); y += 6;
+    doc.text("IVA 19%", 160, y, { align: "right" }); derecha(money(tot.iva), R); y += 6;
+    doc.setFont("helvetica", "bold");
+    doc.text("TOTAL ESTIMADO", 160, y, { align: "right" }); derecha(money(tot.bruto), R); y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110);
+    const nota = "Valores unitarios netos según el listado de precios del contrato. Monto estimado: el valor final se verifica con la guía de despacho y la factura." +
+      (tot.sinValor ? ` ${tot.sinValor} línea(s) sin valor no están incluidas en el total.` : "");
+    const nl = doc.splitTextToSize(nota, R - M);
+    doc.text(nl, M, y); y += nl.length * 3.6;
+    doc.setFontSize(10); doc.setTextColor(0);
+  }
 
   y += 12;
   doc.line(M, y, 90, y); y += 5;
@@ -2441,7 +2501,7 @@ async function vistaCatalogo() {
 
   const { data: articulos, error } = await sb
     .from("articulo")
-    .select("id, descripcion, unidad_medida")
+    .select("id, descripcion, unidad_medida, precio_neto")
     .order("descripcion");
 
   if (error) {
@@ -2464,12 +2524,15 @@ async function vistaCatalogo() {
     <div class="card">
       <h3 style="margin-top:0">Artículos (${(articulos || []).length})</h3>
       <table>
-        <thead><tr><th>Descripción</th><th>U. medida</th><th></th></tr></thead>
+        <thead><tr><th>Descripción</th><th>U. medida</th><th class="num">Precio unitario neto</th><th></th></tr></thead>
         <tbody>
           ${(articulos || []).map(a => `
             <tr data-id="${a.id}">
               <td><input class="ca-r-desc" value="${esc(a.descripcion)}"></td>
               <td><input class="ca-r-um" value="${esc(a.unidad_medida)}"></td>
+              <td class="num">${esAdminTotal()
+                ? `<input class="ca-r-precio" type="number" min="0" step="1" value="${a.precio_neto ?? ""}" style="width:7rem;text-align:right">`
+                : (a.precio_neto == null ? "—" : money(a.precio_neto))}</td>
               <td><button class="secundario ca-guardar">Guardar</button></td>
             </tr>
           `).join("")}
@@ -2505,7 +2568,10 @@ async function vistaCatalogo() {
       const okEl = document.getElementById("ca-ok");
       errorEl.classList.add("oculto"); okEl.classList.add("oculto");
       btn.disabled = true;
-      const { error: errUpd } = await sb.from("articulo").update({ descripcion, unidad_medida }).eq("id", id);
+      const cambios = { descripcion, unidad_medida };
+      const inpPrecio = tr.querySelector(".ca-r-precio");
+      if (inpPrecio) cambios.precio_neto = inpPrecio.value === "" ? null : Number(inpPrecio.value);
+      const { error: errUpd } = await sb.from("articulo").update(cambios).eq("id", id);
       btn.disabled = false;
       if (errUpd) { errorEl.textContent = "No se pudo guardar: " + errUpd.message; errorEl.classList.remove("oculto"); return; }
       okEl.textContent = "Guardado."; okEl.classList.remove("oculto");

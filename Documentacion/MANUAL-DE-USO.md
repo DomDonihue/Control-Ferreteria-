@@ -72,13 +72,13 @@ Se marca "fuera de catálogo" en el formulario normal. Requiere las justificacio
 ### ITO — revisar y tramitar
 - **Revisar:** en **Solicitudes**, las de Obras en *pendiente* tienen **Ver**, **Dar V°B°** y **Rechazar** (el rechazo pide motivo).
 - **Expedientes → Abrir** una solicitud aprobada:
-  - **Descargar hoja de solicitud (PDF)** y enviarla a la empresa → **Marcar como enviada**.
+  - **Descargar hoja de solicitud (PDF)** y enviarla a la empresa → **Marcar como enviada**. La hoja trae cada producto con su cantidad, **valor unitario neto** y subtotal por ítem, y al final el **total neto, IVA y total estimado** según el precio de cada artículo en el Catálogo. El valor final se verifica con la guía de despacho y la factura.
   - Al llegar el material: **Registrar guía de despacho** (N°, fechas, neto, IVA, bruto, adjunto). Puede haber varias → **Marcar material recibido**.
   - **Registrar factura** (N°, fecha, montos, fecha de pago, adjunto). Se descuenta del convenio.
   - **Nota de crédito** si corresponde y **Cerrar expediente**.
   - Un documento mal ingresado no se borra: se **anula** con motivo y el convenio se revierte solo.
 - **Solicitar cotización:** genera un PDF para pedir precio de productos que no están en el catálogo (no se guarda en el sistema).
-- **Catálogo:** agregar y editar artículos.
+- **Catálogo:** agregar y editar artículos. Cada artículo tiene su **precio unitario neto** (el del contrato); solo el Administrador lo modifica. Un producto sin precio aparece con "—" en la hoja y no suma al total.
 
 ### Director de Obras
 - **Solicitudes:** verás **Aprobar** y **Rechazar** en las pendientes de otras direcciones y en las **visadas** de Obras. Usa **Ver** para revisar el detalle antes. El rechazo exige motivo.
