@@ -1676,11 +1676,16 @@ function _difBitacora(det) {
 
 function _filaBitacora(r) {
   const dif = r.accion === "editar" ? _difBitacora(r.detalle) : "";
+  const d = r.detalle || {};
+  let cambio = "";
+  if (r.accion === "cambiar_estado" && d.de && d.a) cambio = `${d.de} → ${d.a}`;
+  else if (r.accion === "crear" && r.entidad === "solicitud") cambio = `ingresó${d.n ? " N° " + d.n : ""}${d.tipo ? " (" + d.tipo + ")" : ""}`;
+  const texto = [cambio, r.motivo ? `Motivo: ${r.motivo}` : ""].filter(Boolean).join(" · ");
   return `<tr>
     <td>${_fechaHora(r.ocurrido_en)}</td>
     <td>${esc(r.actor_nombre) || "—"}</td>
     <td>${esc(_BITACORA_ACCION[r.accion] || r.accion)} <span class="hint">${esc(r.entidad)}</span></td>
-    <td>${esc(r.motivo) || (dif ? `<span class="b-dif">${esc(dif)}</span>` : "—")}</td>
+    <td>${esc(texto) || (dif ? `<span class="b-dif">${esc(dif)}</span>` : "—")}</td>
     <td class="num">${r.monto ? money(r.monto) : ""}</td>
   </tr>`;
 }
@@ -1689,7 +1694,7 @@ function bloqueBitacora(rows) {
   return `
     <div class="card">
       <div class="exp-seccion"><h4>Bitácora del expediente</h4><span class="hint">${rows.length} movimiento(s)</span></div>
-      <p class="hint" style="margin-top:0">Registro inmutable: quién creó, editó o anuló cada documento, y los reversos del convenio.</p>
+      <p class="hint" style="margin-top:0">Registro inmutable: quién creó, editó o anuló cada documento, los reversos del convenio y los cambios de estado de la solicitud.</p>
       ${rows.length ? `
         <table class="bitacora-lista">
           <tr><th>Fecha y hora</th><th>Quién</th><th>Acción</th><th>Motivo / cambio</th><th class="num">Monto</th></tr>
