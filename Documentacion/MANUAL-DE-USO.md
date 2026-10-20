@@ -81,7 +81,7 @@ Se marca "fuera de catálogo" en el formulario normal. Requiere las justificacio
 - **Catálogo:** agregar y editar artículos. Cada artículo tiene su **precio unitario neto** (el del contrato); solo el Administrador lo modifica. Un producto sin precio aparece con "—" en la hoja y no suma al total.
 
 ### Director de Obras
-- **Solicitudes:** verás **Aprobar** y **Rechazar** en las pendientes de otras direcciones y en las **visadas** de Obras. Usa **Ver** para revisar el detalle antes. El rechazo exige motivo.
+- **Solicitudes:** la columna **Monto estimado** muestra el total con IVA de cada solicitud según el listado de precios (el precio de cada producto queda guardado al momento de pedir, así que no cambia si después se corrige el catálogo). Verás **Aprobar** y **Rechazar** en las pendientes de otras direcciones y en las **visadas** de Obras. Usa **Ver** para revisar el detalle antes. El rechazo exige motivo.
 - **Bitácora:** consulta quién hizo qué y cuándo.
 
 ### DAF y Alcalde

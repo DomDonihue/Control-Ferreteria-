@@ -1300,17 +1300,26 @@ async function vistaSolicitudes() {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
   const { data, error } = await sb
     .from("solicitud")
-    .select("*, unidad(nombre), obra(nombre)")
+    .select("*, unidad(nombre), obra(nombre), solicitud_detalle(cantidad_solicitada, precio_unitario_neto, articulo(precio_neto))")
     .order("creado_en", { ascending: false });
 
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
+  // El monto estimado (según el listado de precios) lo ven quienes aprueban o tramitan.
+  const verMonto = esDirector() || puedeOperar();
+  const celdaMonto = (s) => {
+    const det = s.solicitud_detalle || [];
+    if (!det.some(d => valorUnitarioNeto(d) != null)) return "—";
+    const t = totalesDetalle(det);
+    return `<span title="Neto ${money(t.neto)} + IVA ${money(t.iva)}">${money(t.bruto)}</span>${t.sinValor ? `<div class="hint">${t.sinValor} sin valor</div>` : ""}`;
+  };
+
   vista().innerHTML = `
     <div class="card">
-      ${esDirector() ? `<p class="hint">Como Director de Obras apruebas o rechazas las solicitudes pendientes. Las de la Dirección de Obras llegan a ti ya con el V°B° del ITO (estado <span class="pill visada">visada</span>).</p>` : ""}
+      ${esDirector() ?`<p class="hint">Como Director de Obras apruebas o rechazas las solicitudes pendientes. Las de la Dirección de Obras llegan a ti ya con el V°B° del ITO (estado <span class="pill visada">visada</span>).</p>` : ""}
       ${puedeOperar() ? `<p class="hint">Solicitudes de la Dirección de Obras en estado <span class="pill pendiente">pendiente</span>: revísalas y da tu V°B° para que pasen al Director, o recházalas.</p>` : ""}
       <table>
-        <tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th><th>Estado</th><th></th></tr>
+        <tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th>${verMonto ? `<th class="num">Monto estimado</th>` : ""}<th>Estado</th><th></th></tr>
         ${(data.length ? data : []).map(s => `
           <tr>
             <td class="num">${esc(numSol(s)) || "—"}</td>
@@ -1320,6 +1329,7 @@ async function vistaSolicitudes() {
               ${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
+            ${verMonto ? `<td class="num">${celdaMonto(s)}</td>` : ""}
             <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}</td>
             <td>${accionesSolicitud(s)}</td>
           </tr>
@@ -1424,7 +1434,8 @@ function abrirExpediente(id) { editarFacturaId = null; vistaExpediente(id); }
 // Precio unitario neto del artículo (listado de precios del contrato) y total
 // de lo solicitado. Los productos sin precio se avisan y no suman.
 function valorUnitarioNeto(d) {
-  const p = d.articulo?.precio_neto;
+  // El precio guardado en la línea al pedir; si es anterior, el vigente del artículo.
+  const p = d.precio_unitario_neto ?? d.articulo?.precio_neto;
   return p == null || p === "" ? null : Number(p);
 }
 function totalesDetalle(detalle) {
@@ -1444,7 +1455,7 @@ async function vistaExpediente(id) {
   vista().innerHTML = "<div class='card'>Cargando expediente…</div>";
   const [{ data: s, error }, { data: detalle }, { data: guias }, { data: facturas }, { data: cotizaciones }, { data: notasCredito }, { data: comprasSol }, { data: bitacoraRows }] = await Promise.all([
     sb.from("solicitud").select("*, unidad(nombre), obra(nombre)").eq("id", id).single(),
-    sb.from("solicitud_detalle").select("cantidad_solicitada, descripcion_libre, unidad_medida_libre, articulo(descripcion, unidad_medida, precio_neto)").eq("solicitud_id", id),
+    sb.from("solicitud_detalle").select("cantidad_solicitada, descripcion_libre, unidad_medida_libre, precio_unitario_neto, articulo(descripcion, unidad_medida, precio_neto)").eq("solicitud_id", id),
     sb.from("guia_despacho").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
     sb.from("factura").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),
     sb.from("cotizacion").select("*").eq("solicitud_id", id).order("fecha", { ascending: true }),

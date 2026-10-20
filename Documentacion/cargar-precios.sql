@@ -7,7 +7,9 @@
 -- catálogo. Con eso, la hoja de solicitud y el expediente muestran valor
 -- unitario, subtotal por ítem y total.
 --
--- Solo ACTUALIZA el precio. NO crea, NO borra y NO cambia nada más.
+-- Solo ACTUALIZA precios. NO crea ni borra productos. Además guarda el precio en
+-- cada línea de solicitud: las nuevas lo reciben solas al crearse y las que ya
+-- existen se rellenan con el precio actual (ver punto 3 más abajo).
 --
 -- Cómo calza: cada producto del listado se busca por sus DOS nombres oficiales
 -- (el del Formulario N°5 y el de la Ficha Técnica, que comparten el N° de ítem),
@@ -202,6 +204,34 @@ upd as (
 insert into _usados select item from upd;
 
 drop function if exists public._norm_desc(text);
+
+-- 3) El precio también queda en cada LÍNEA de solicitud (el precio vigente al
+--    pedir), para que una solicitud ya hecha no cambie si después se corrige el
+--    precio del artículo.
+--    a) las líneas nuevas lo reciben solas al crearse (sin depender de la app);
+--    b) las solicitudes que ya existen se rellenan con el precio actual.
+alter table solicitud_detalle add column if not exists precio_unitario_neto numeric;
+
+create or replace function public.fn_precio_en_detalle()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.precio_unitario_neto is null and new.articulo_id is not null then
+    select precio_neto into new.precio_unitario_neto from articulo where id = new.articulo_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_precio_en_detalle on solicitud_detalle;
+create trigger trg_precio_en_detalle
+  before insert on solicitud_detalle
+  for each row execute function public.fn_precio_en_detalle();
+
+update solicitud_detalle d
+set precio_unitario_neto = a.precio_neto
+from articulo a
+where a.id = d.articulo_id
+  and d.precio_unitario_neto is null
+  and a.precio_neto is not null;
 
 commit;
 
