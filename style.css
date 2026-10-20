@@ -212,7 +212,7 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
 .pill.pendiente, .pill.observada{ background:var(--warn-tint); color:var(--warn); }
 .pill.aprobada, .pill.recibida, .pill.pagada, .pill.cerrada{ background:var(--ok-tint); color:var(--ok); }
 .pill.enviada, .pill.emitida{ background:var(--purple-tint); color:var(--purple); }
-.pill.comprada, .pill.facturada{ background:var(--info-tint); color:var(--info); }
+.pill.comprada, .pill.facturada, .pill.visada{ background:var(--info-tint); color:var(--info); }
 .pill.rechazada{ background:var(--critical-tint); color:var(--critical); }
 .pill.anulada{ background:var(--muted-tint); color:var(--ink-soft); }
 

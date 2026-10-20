@@ -177,8 +177,15 @@ async function actualizarNotificaciones() {
   const partes = [];
   try {
     if (["admin", "lector_operativo"].includes(rol)) {
-      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "pendiente");
+      // Para el Director: las visadas por el ITO y las pendientes que no son de Obras.
+      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true })
+        .or("estado.eq.visada,and(estado.eq.pendiente,tipo.neq.operaciones)");
       if (count) partes.push({ n: count, texto: `${count} solicitud${count === 1 ? "" : "es"} esperando tu V°B°`, ir: "solicitudes" });
+    }
+    if (["admin", "admin_ito"].includes(rol)) {
+      const { count: porRevisar } = await sb.from("solicitud").select("id", { count: "exact", head: true })
+        .eq("estado", "pendiente").eq("tipo", "operaciones");
+      if (porRevisar) partes.push({ n: porRevisar, texto: `${porRevisar} solicitud${porRevisar === 1 ? "" : "es"} de Obras por revisar`, ir: "solicitudes" });
     }
     if (["admin", "admin_ito"].includes(rol)) {
       const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "aprobada");
@@ -327,6 +334,7 @@ const ROLES = {
   admin: "Administrador de plataforma",
   admin_ito: "Encargado de Operaciones (ITO)",
   solicitante: "Solicitante",
+  solicitante_obras: "Solicitante Dirección de Obras",
   lector_operativo: "Director de Obras",
   lector_pagos: "DAF",
   lector_ejecutivo: "Alcalde",
@@ -381,17 +389,17 @@ const ICONOS = {
 // (null = ítem suelto arriba, como "Inicio").
 // ---------------------------------------------------------------------
 const TABS = [
-  { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
+  { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
-  { id: "nueva-operaciones", label: "Solicitudes Encargado", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaNuevaSolicitudOperaciones },
+  { id: "nueva-operaciones", label: "Solicitudes Encargado", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaNuevaSolicitudOperaciones },
   { id: "cotizar", label: "Solicitar cotización", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaCotizacionProveedor },
-  { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "lector_operativo"], render: vistaSolicitudes },
+  { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
   { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin", "admin_ito"], render: vistaCatalogo },
   { id: "convenio", label: "Convenio / ferretería", grupo: "Administración", icono: "convenio", roles: ["admin"], render: vistaConvenio },
   { id: "usuarios", label: "Usuarios", grupo: "Administración", icono: "usuarios", roles: ["admin"], render: vistaUsuarios },
-  { id: "clave", label: "Cambiar clave", grupo: "Mi cuenta", icono: "clave", roles: ["admin", "admin_ito", "solicitante", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: () => vistaCambiarClave(false) },
+  { id: "clave", label: "Cambiar clave", grupo: "Mi cuenta", icono: "clave", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: () => vistaCambiarClave(false) },
 ];
 
 function armarTabs() {
@@ -943,15 +951,22 @@ async function guardarSolicitud() {
 // Igual queda "pendiente" del V°B° del Director de Obras.
 // ---------------------------------------------------------------------
 async function vistaNuevaSolicitudOperaciones() {
-  const { data: unidades } = await sb.from("unidad").select("id, nombre").order("nombre");
+  const { data: todasUnidades } = await sb.from("unidad").select("id, nombre").order("nombre");
   lineasSolicitud = [];
+
+  // Los usuarios de Obras solo piden a nombre de su dirección (la de su perfil).
+  const soloObras = rolEfectivo() === "solicitante_obras";
+  const unidades = soloObras ? (todasUnidades || []).filter(u => u.id === perfilActual.unidad_id) : (todasUnidades || []);
 
   vista().innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">Solicitudes Encargado — Dirección de Obras</h3>
-      <p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras (ITO).
-        El N° de solicitud se genera automáticamente. Sigue el mismo flujo que las demás solicitudes:
-        queda <span class="pill pendiente">pendiente</span> del V°B° del Director de Obras.</p>
+      <p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras
+        (Operaciones, Aseo y Ornato, Edificios). El N° de solicitud se genera automáticamente.
+        ${soloObras
+          ? `Al ingresarla queda <span class="pill pendiente">pendiente</span> de la revisión del ITO; con su V°B° pasa al Director de Obras para su aprobación.`
+          : `Al ingresarla pasa directo al V°B° del Director de Obras.`}</p>
+      ${soloObras && !unidades.length ? `<p class="error">Tu perfil no tiene una dirección asignada. Pide al administrador que te la asigne en Usuarios.</p>` : ""}
 
       <div style="border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin:12px 0;background:var(--surface-2)">
         <label style="margin-top:0">¿Tienes el Formulario Único en PDF editable? Cárgalo y se autocompleta</label>
@@ -961,9 +976,9 @@ async function vistaNuevaSolicitudOperaciones() {
       </div>
 
       <label>Dirección responsable</label>
-      <select id="nso-unidad">
-        <option value="">— selecciona —</option>
-        ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+      <select id="nso-unidad" ${soloObras ? "disabled" : ""}>
+        ${soloObras ? "" : `<option value="">— selecciona —</option>`}
+        ${unidades.map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
       </select>
       <label>Unidad</label>
       <select id="nso-unidad-interna">
@@ -1109,11 +1124,20 @@ async function guardarSolicitudOperaciones() {
     if (!ubicacion) { mostrarError("Indica la ubicación de uso de los materiales."); return; }
     if (!lineasSolicitud.length) { mostrarError("Agrega al menos un material."); return; }
 
+    // Los usuarios de Obras quedan "pendiente" de la revisión del ITO. Si la
+    // crea el propio Encargado (o el admin), no se revisa a sí mismo: entra
+    // ya visada y va directo al Director.
+    const porRevisar = rolEfectivo() === "solicitante_obras";
     const payload = {
       unidad_id, unidad_interna, solicitante, motivo, ubicacion,
       fecha_solicitud: hoyISO(),
       tipo: "operaciones",
     };
+    if (!porRevisar) {
+      payload.estado = "visada";
+      payload.visado_por = perfilActual.id;
+      payload.visado_en = new Date().toISOString();
+    }
 
     const { data: solicitud, error } = await sb.from("solicitud").insert(payload).select().single();
     if (error) { mostrarError(error.message); return; }
@@ -1131,10 +1155,10 @@ async function guardarSolicitudOperaciones() {
     actualizarNotificaciones();
     vista().innerHTML = `<div class="card">
       <h3 style="margin-top:0">Solicitud del Encargado ingresada</h3>
-      <p>N° <strong>${esc(numSol(solicitud))}</strong> · Queda
-      <span class="pill pendiente">pendiente</span> del visto bueno del Director de Obras.
-      Sigue el mismo flujo que las demás solicitudes: una vez aprobada, descárgala desde
-      <strong>Expedientes</strong> para continuar con guías y factura.</p>
+      <p>N° <strong>${esc(numSol(solicitud))}</strong> · ${porRevisar
+        ? `Queda <span class="pill pendiente">pendiente</span> de la revisión del ITO; con su V°B° pasará al Director de Obras para su aprobación.`
+        : `Queda <span class="pill visada">visada</span> y espera la aprobación del Director de Obras.`}
+      Una vez aprobada, el ITO continúa desde <strong>Expedientes</strong> con la hoja, las guías y la factura.</p>
     </div>`;
   } finally { _unlock(); }
 }
@@ -1336,10 +1360,10 @@ async function vistaSolicitudes() {
 
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
-  const puedeVB = esDirector(); // visto bueno del Director de Obras (o admin)
   vista().innerHTML = `
     <div class="card">
-      ${puedeVB ? `<p class="hint">Como Director de Obras das el visto bueno: aprueba o rechaza las solicitudes pendientes.</p>` : ""}
+      ${esDirector() ? `<p class="hint">Como Director de Obras apruebas o rechazas las solicitudes pendientes. Las de la Dirección de Obras llegan a ti ya con el V°B° del ITO (estado <span class="pill visada">visada</span>).</p>` : ""}
+      ${puedeOperar() ? `<p class="hint">Solicitudes de la Dirección de Obras en estado <span class="pill pendiente">pendiente</span>: revísalas y da tu V°B° para que pasen al Director, o recházalas.</p>` : ""}
       <table>
         <tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th><th>Estado</th><th></th></tr>
         ${(data.length ? data : []).map(s => `
@@ -1352,12 +1376,7 @@ async function vistaSolicitudes() {
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             <td><span class="pill ${s.estado}">${s.estado}</span></td>
-            <td>
-              ${puedeVB && s.estado === "pendiente" ? `
-                <button class="secundario" onclick="resolverSolicitud('${s.id}','aprobada')">Aprobar</button>
-                <button class="secundario" onclick="resolverSolicitud('${s.id}','rechazada')">Rechazar</button>
-              ` : `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver expediente</button>`}
-            </td>
+            <td>${accionesSolicitud(s)}</td>
           </tr>
         `).join("")}
       </table>
@@ -1365,8 +1384,30 @@ async function vistaSolicitudes() {
   `;
 }
 
-async function resolverSolicitud(id, estado) {
-  await sb.from("solicitud").update({ estado, aprobado_por: perfilActual.id }).eq("id", id);
+// Botones de cada fila según rol y etapa:
+//  - tipo "operaciones" y pendiente  -> revisa el ITO (V°B° o rechazo)
+//  - visada, o pendiente de otro tipo -> decide el Director (aprobar o rechazar)
+function accionesSolicitud(s) {
+  const btn = (txt, estado, etapa) =>
+    `<button class="secundario" onclick="resolverSolicitud('${s.id}','${estado}'${etapa ? `,'${etapa}'` : ""})">${txt}</button>`;
+  const ver = `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver</button>`;
+
+  if (puedeOperar() && s.tipo === "operaciones" && s.estado === "pendiente") {
+    return `${ver} ${btn("Dar V°B°", "visada", "ito")} ${btn("Rechazar", "rechazada", "ito")}`;
+  }
+  if (esDirector() && (s.estado === "visada" || (s.estado === "pendiente" && s.tipo !== "operaciones"))) {
+    return `${ver} ${btn("Aprobar", "aprobada")} ${btn("Rechazar", "rechazada")}`;
+  }
+  const espera = s.tipo === "operaciones" && s.estado === "pendiente" ? `<div class="hint">En revisión del ITO</div>` : "";
+  return `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver expediente</button>${espera}`;
+}
+
+async function resolverSolicitud(id, estado, etapa) {
+  const cambios = etapa === "ito"
+    ? { estado, visado_por: perfilActual.id, visado_en: new Date().toISOString() }
+    : { estado, aprobado_por: perfilActual.id };
+  const { error } = await sb.from("solicitud").update(cambios).eq("id", id);
+  if (error) { alert("No se pudo actualizar la solicitud: " + error.message); return; }
   actualizarNotificaciones();
   vistaSolicitudes();
 }

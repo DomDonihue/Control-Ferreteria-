@@ -66,6 +66,7 @@ Obras como `lector_operativo`, y cada solicitante con su
 | `admin` | Administrador de la plataforma | **todo**: administra usuarios (rol + unidad), catálogo de artículos, y además todo lo operativo |
 | `admin_ito` | Encargado de Operaciones (ITO) | operación: crear solicitudes, **aprobar/rechazar**, generar compras. NO administra usuarios ni catálogo |
 | `solicitante` | Unidades solicitantes | crear solicitudes de su unidad y ver las suyas |
+| `solicitante_obras` | Personal de la Dirección de Obras | crear solicitudes con el formulario "Solicitudes Encargado" (dirección fija: la de su perfil); quedan `pendiente` hasta el V°B° del ITO (`visada`) y luego las aprueba el Director. SQL: `Documentacion/flujo-solicitante-obras.sql` |
 | `lector_operativo` | Director de Obras | ver solicitudes y compras |
 | `lector_pagos` | DAF | ver compras |
 | `lector_ejecutivo` | Alcalde | ver el resumen |

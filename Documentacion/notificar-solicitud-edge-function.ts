@@ -4,8 +4,11 @@
 //
 // Se dispara con un Database Webhook de Supabase sobre la tabla
 // `solicitud`:
-//   - INSERT con estado='pendiente'  -> avisa al Director de Obras
-//     (rol lector_operativo) que hay una solicitud por su V°B°.
+//   - INSERT pendiente de tipo 'operaciones' -> avisa al ITO (admin_ito)
+//     que hay una solicitud de Obras por revisar.
+//   - INSERT pendiente (otro tipo), INSERT visada, o UPDATE a 'visada'
+//     -> avisa al Director de Obras (rol lector_operativo) que hay una
+//     solicitud por su V°B°.
 //   - UPDATE a estado='aprobada'     -> avisa al ITO (rol admin_ito)
 //     que ya puede tramitarla con la empresa.
 //
@@ -52,12 +55,31 @@ Deno.serve(async (req) => {
     const payload = await req.json();
     const { type, record, old_record } = payload;
 
-    if (type === "INSERT" && record?.estado === "pendiente") {
+    const numero = record?.correlativo || record?.n_solicitud || record?.id;
+
+    // Solicitud de la Dirección de Obras creada por un usuario de Obras:
+    // primero la revisa el ITO.
+    if (type === "INSERT" && record?.estado === "pendiente" && record?.tipo === "operaciones") {
+      const emails = await emailsPorRol("admin_ito");
+      await enviarCorreo(
+        emails,
+        "Solicitud de la Dirección de Obras por revisar",
+        `Hay una nueva solicitud de Obras (N° ${numero}) esperando tu revisión y V°B°.\n\nRevísala en Control Ferretería: ${APP_URL}`,
+      );
+    }
+
+    // Las demás solicitudes pendientes van directo al Director; las de Obras
+    // le llegan cuando el ITO las visa (o si las crea el propio ITO ya visadas).
+    const llegaAlDirector =
+      (type === "INSERT" && record?.estado === "pendiente" && record?.tipo !== "operaciones") ||
+      (type === "INSERT" && record?.estado === "visada") ||
+      (type === "UPDATE" && record?.estado === "visada" && old_record?.estado !== "visada");
+    if (llegaAlDirector) {
       const emails = await emailsPorRol("lector_operativo");
       await enviarCorreo(
         emails,
         "Nueva solicitud de materiales pendiente de V°B°",
-        `Hay una nueva solicitud de materiales (N° ${record.correlativo || record.n_solicitud || record.id}) esperando tu visto bueno.\n\nRevísala en Control Ferretería: ${APP_URL}`,
+        `Hay una nueva solicitud de materiales (N° ${numero}) esperando tu visto bueno.\n\nRevísala en Control Ferretería: ${APP_URL}`,
       );
     }
 
