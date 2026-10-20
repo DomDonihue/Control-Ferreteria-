@@ -645,7 +645,7 @@ async function vistaNuevaSolicitud() {
         ${(unidades || []).map(u => `<option value="${u.id}" ${u.id === perfilActual.unidad_id ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
       </select>
       <label>Responsable del requerimiento</label>
-      <input id="ns-solicitante" value="${esc(perfilActual.nombre)}" placeholder="Nombre y cargo">
+      <input id="ns-solicitante" placeholder="Nombre y cargo">
       <label>Teléfono / correo de contacto</label>
       <input id="ns-contacto">
       <label>Responsable de supervisar la ejecución</label>
@@ -981,7 +981,7 @@ async function vistaNuevaSolicitudOperaciones() {
         <option value="Edificios">Edificios</option>
       </select>
       <label>Responsable del requerimiento</label>
-      <input id="nso-solicitante" value="${esc(perfilActual.nombre)}" placeholder="Nombre y cargo">
+      <input id="nso-solicitante" placeholder="Nombre y cargo">
       <label>Ubicación de uso de los materiales</label>
       <textarea id="nso-ubicacion" rows="2" placeholder="Calle, número, sector"></textarea>
       <label>Motivo</label>
