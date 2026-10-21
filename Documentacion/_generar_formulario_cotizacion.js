@@ -3,7 +3,7 @@
 // Cotización Obras -> Nueva solicitud de cotización (extraerFormularioPDF en app.js).
 //
 // Campos: unidad_interna (lista), responsable, ubicacion, motivo,
-//         producto_N, cantidad_N, unidad_N  (N = 1 a 15)
+//         producto_N, cantidad_N, unidad_N, valor_neto_N  (N = 1 a 15)
 //
 // Uso (desde esta carpeta):   npm i pdf-lib   y luego   node _generar_formulario_cotizacion.js
 const fs = require("fs");
@@ -40,8 +40,8 @@ const LUGAR = "Avenida Estación 344, Doñihue";
   // Encabezado
   texto("SOLICITUD DE COTIZACIÓN", M, 800, { size: 20, font: negrita, color: azul });
   texto("Dirección de Obras Municipales — productos fuera del catálogo del contrato", M, 782, { size: 10, font: cursiva, color: dorado });
-  texto("Complete los campos y suba este PDF en Control Ferretería (Cotización Obras): el sistema toma de aquí la unidad, el responsable, la ubicación y los productos con su cantidad y unidad de medida.",
-    M, 762, { size: 8.5, color: gris, maxWidth: W, lineHeight: 11 });
+  texto("Complete los campos y suba este PDF en Control Ferretería (Cotización Obras): el sistema toma de aquí la unidad, el responsable, la ubicación y los productos con su cantidad y unidad de medida. Si un proveedor responde en este mismo formulario, anote el valor neto (precio unitario sin IVA) de cada producto y suba el PDF en su cotización.",
+    M, 768, { size: 8.3, color: gris, maxWidth: W, lineHeight: 10.5 });
   linea(738);
 
   // 1. Identificación
@@ -64,17 +64,20 @@ const LUGAR = "Avenida Estación 344, Doñihue";
 
   // 2. Productos
   texto("2. Productos a cotizar", M, 532, { size: 13, font: negrita, color: azul });
-  const xProd = M + 34, wProd = 300, wCant = 66, xCant = xProd + wProd + 4, xUni = xCant + wCant + 4, wUni = M + W - xUni;
+  const xProd = M + 34, wProd = 228, wCant = 58, wUni = 96;
+  const xCant = xProd + wProd + 4, xUni = xCant + wCant + 4, xVal = xUni + wUni + 4, wVal = M + W - xVal;
   texto("N°", M + 6, 514, { size: 8, font: negrita });
   texto("Producto (con sus especificaciones)", xProd, 514, { size: 8, font: negrita });
   texto("Cantidad", xCant, 514, { size: 8, font: negrita });
   texto("Unidad de medida", xUni, 514, { size: 8, font: negrita });
+  texto("Valor neto ($)", xVal, 514, { size: 8, font: negrita });
   for (let i = 0; i < FILAS; i++) {
     const y = 488 - i * 26;
     texto(String(i + 1), M + 8, y + 7, { size: 9, color: gris });
     campo(`producto_${i + 1}`, xProd, y, wProd, 22);
     campo(`cantidad_${i + 1}`, xCant, y, wCant, 22);
     campo(`unidad_${i + 1}`, xUni, y, wUni, 22);
+    campo(`valor_neto_${i + 1}`, xVal, y, wVal, 22);
   }
 
   page.drawLine({ start: { x: M, y: 70 }, end: { x: M + W, y: 70 }, thickness: 0.6, color: borde });

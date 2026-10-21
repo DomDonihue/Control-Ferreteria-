@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Política de contenido: la página solo carga scripts de estos orígenes, solo
+     habla con nuestro Supabase y no admite plugins ni formularios externos.
+     'unsafe-inline' sigue siendo necesario por los onclick del HTML. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://ccdzkeqweqrbciqbpdwj.supabase.co; connect-src 'self' https://ccdzkeqweqrbciqbpdwj.supabase.co wss://ccdzkeqweqrbciqbpdwj.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
 <title>Control Ferretería · Municipalidad de Doñihue</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="img/logo.png">

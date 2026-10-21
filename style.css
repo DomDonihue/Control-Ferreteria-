@@ -433,6 +433,23 @@ label.chk input[type="checkbox"]{ width:16px; height:16px; flex-shrink:0; accent
   box-shadow:0 12px 30px rgba(15,27,51,.18);
 }
 
+/* ---------- BUSCADOR, PAGINACIÓN Y CONFIRMACIÓN ---------- */
+.barra-lista{ display:flex; gap:.6rem; flex-wrap:wrap; margin:.6rem 0 .8rem; }
+.barra-lista input{ flex:1 1 260px; }
+.barra-lista select{ flex:0 1 200px; height:44px; }
+.paginador{ display:flex; align-items:center; justify-content:center; gap:.8rem; flex-wrap:wrap; margin-top:.8rem; font-size:.85rem; color:var(--ink-soft); }
+.paginador button:disabled{ opacity:.45; cursor:default; }
+dialog.modal-confirmar{
+  border:1px solid var(--line, #d5dbe6); border-radius:14px; padding:1.2rem 1.3rem;
+  width:min(440px, calc(100% - 32px)); box-shadow:0 18px 40px rgba(15,27,51,.28);
+  background:var(--surface, #fff); color:var(--ink, #1b2740);
+}
+dialog.modal-confirmar::backdrop{ background:rgba(15,27,51,.45); }
+dialog.modal-confirmar h3{ margin:0 0 .4rem; }
+dialog.modal-confirmar p{ margin:.2rem 0 .8rem; font-size:.9rem; }
+dialog.modal-confirmar textarea{ width:100%; box-sizing:border-box; margin-bottom:.4rem; }
+dialog.modal-confirmar .acciones{ display:flex; justify-content:flex-end; gap:.6rem; margin-top:.6rem; }
+
 @media (prefers-reduced-motion:reduce){ *{ animation:none!important; transition:none!important; } }
 
 /* ---------- IMPRESIÓN: hoja de solicitud ---------- */

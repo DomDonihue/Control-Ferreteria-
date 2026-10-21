@@ -1302,12 +1302,82 @@ function pillTipoSolicitud(tipo, s) {
   return "";
 }
 
+// ---------- Confirmación (reemplaza confirm/prompt del navegador) ----------
+// Devuelve true al confirmar, el texto escrito si pide motivo, o null si cancela.
+function confirmar({ titulo, texto = "", boton = "Confirmar", motivo = false }) {
+  return new Promise(resolver => {
+    const d = document.createElement("dialog");
+    d.className = "modal-confirmar";
+    d.innerHTML = `<h3>${esc(titulo)}</h3>${texto ? `<p>${esc(texto)}</p>` : ""}
+      ${motivo ? `<textarea rows="3" maxlength="500" placeholder="Escribe el motivo…"></textarea><p class="error oculto"></p>` : ""}
+      <div class="acciones"><button type="button" class="secundario" data-no>Cancelar</button><button type="button" data-ok>${esc(boton)}</button></div>`;
+    let listo = false;
+    const fin = (v) => { if (listo) return; listo = true; d.close(); d.remove(); resolver(v); };
+    const ta = d.querySelector("textarea");
+    d.querySelector("[data-no]").onclick = () => fin(null);
+    d.addEventListener("cancel", (e) => { e.preventDefault(); fin(null); });
+    d.querySelector("[data-ok]").onclick = () => {
+      if (!motivo) return fin(true);
+      const v = ta.value.trim();
+      if (!v) { const er = d.querySelector(".error"); er.textContent = "El motivo es obligatorio."; er.classList.remove("oculto"); ta.focus(); return; }
+      fin(v);
+    };
+    document.body.appendChild(d);
+    d.showModal();
+    (ta || d.querySelector("[data-ok]")).focus();
+  });
+}
+
+// ---------- Listas: carga completa, buscador, filtro de estado y paginación ----------
+const POR_PAGINA = 25;
+const _lista = {};
+const _sinTildes = (t) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+// Supabase entrega como máximo 1000 filas por consulta: se pide por tramos.
+async function cargarTodas(armar) {
+  const todas = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await armar().range(desde, desde + 999);
+    if (error) return { error };
+    todas.push(...data);
+    if (data.length < 1000) return { data: todas };
+  }
+}
+
+function listaCrear(clave, filas, textoFn, cabecera, filaFn) {
+  _lista[clave] = { q: "", estado: "", pag: 1, filas, textoFn, cabecera, filaFn };
+}
+function listaBarra(clave, estados) {
+  return `<div class="barra-lista">
+    <input type="search" placeholder="Buscar por N°, motivo, unidad o solicitante…" oninput="listaCambiar('${clave}','q',this.value)">
+    <select onchange="listaCambiar('${clave}','estado',this.value)"><option value="">Todos los estados</option>${estados.map(e => `<option value="${e}">${e}</option>`).join("")}</select>
+  </div><div id="lista-${clave}"></div>`;
+}
+function listaCambiar(clave, campo, valor) { _lista[clave][campo] = valor; _lista[clave].pag = 1; listaPintar(clave); }
+function listaPagina(clave, p) { _lista[clave].pag = p; listaPintar(clave); }
+function listaPintar(clave) {
+  const L = _lista[clave], el = document.getElementById("lista-" + clave);
+  if (!el) return;
+  const q = _sinTildes(L.q).trim();
+  const f = L.filas.filter(s => (!L.estado || s.estado === L.estado) && (!q || _sinTildes(L.textoFn(s)).includes(q)));
+  const paginas = Math.max(1, Math.ceil(f.length / POR_PAGINA));
+  L.pag = Math.min(Math.max(1, L.pag), paginas);
+  const ini = (L.pag - 1) * POR_PAGINA;
+  el.innerHTML = f.length
+    ? `<table>${L.cabecera}${f.slice(ini, ini + POR_PAGINA).map(L.filaFn).join("")}</table>
+       <div class="paginador"><button class="secundario" ${L.pag <= 1 ? "disabled" : ""} onclick="listaPagina('${clave}',${L.pag - 1})">‹ Anterior</button>
+       <span>Página ${L.pag} de ${paginas} · ${f.length} resultado${f.length === 1 ? "" : "s"}</span>
+       <button class="secundario" ${L.pag >= paginas ? "disabled" : ""} onclick="listaPagina('${clave}',${L.pag + 1})">Siguiente ›</button></div>`
+    : `<p class="hint">No hay resultados${L.filas.length ? " con ese filtro" : ""}.</p>`;
+}
+const ESTADOS_SOLICITUD = ["pendiente", "visada", "aprobada", "rechazada", "enviada", "recibida", "facturada", "cerrada"];
+
 async function vistaSolicitudes() {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
-  const { data, error } = await sb
+  const { data, error } = await cargarTodas(() => sb
     .from("solicitud")
     .select("*, unidad(nombre), obra(nombre), solicitud_detalle(cantidad_solicitada, precio_unitario_neto, articulo(precio_neto))")
-    .order("creado_en", { ascending: false });
+    .order("creado_en", { ascending: false }).order("id"));
 
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
@@ -1324,25 +1394,26 @@ async function vistaSolicitudes() {
     <div class="card">
       ${esDirector() ?`<p class="hint">Como Director de Obras apruebas o rechazas las solicitudes pendientes. Las de la Dirección de Obras llegan a ti ya con el V°B° del ITO (estado <span class="pill visada">visada</span>).</p>` : ""}
       ${puedeOperar() ? `<p class="hint">Solicitudes de la Dirección de Obras en estado <span class="pill pendiente">pendiente</span>: revísalas y da tu V°B° para que pasen al Director, o recházalas.</p>` : ""}
-      <table>
-        <tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th>${verMonto ? `<th class="num">Monto estimado</th>` : ""}<th>Estado</th><th></th></tr>
-        ${(data.length ? data : []).map(s => `
+      ${listaBarra("sol", ESTADOS_SOLICITUD)}
+    </div>
+  `;
+  listaCrear("sol", data,
+    (s) => `${numSol(s)} ${s.motivo} ${s.unidad?.nombre} ${s.obra?.nombre} ${s.solicitante} ${s.ubicacion} ${s.fecha_solicitud}`,
+    `<tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th>${verMonto ? `<th class="num">Monto estimado</th>` : ""}<th>Estado</th><th></th></tr>`,
+    (s) => `
           <tr>
             <td class="num">${esc(numSol(s)) || "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
             <td>
-              ${pillTipoSolicitud(s.tipo, s)}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
+              ${pillTipoSolicitud(s.tipo, s)}${esc(s.motivo)}${s.memo_url ? ` · ${enlaceArchivo(s.memo_url, `documento`)}` : ""}
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             ${verMonto ? `<td class="num">${celdaMonto(s)}</td>` : ""}
             <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}</td>
             <td>${accionesSolicitud(s)}</td>
-          </tr>
-        `).join("")}
-      </table>
-    </div>
-  `;
+          </tr>`);
+  listaPintar("sol");
 }
 
 // Botones de cada fila según rol y etapa:
@@ -1368,9 +1439,14 @@ async function resolverSolicitud(id, estado, etapa) {
     ? { estado, visado_por: perfilActual.id, visado_en: new Date().toISOString() }
     : { estado, aprobado_por: perfilActual.id };
   if (estado === "rechazada") {
-    const motivo = (prompt("Motivo del rechazo (obligatorio, lo verá quien hizo la solicitud):") || "").trim();
+    const motivo = await confirmar({ titulo: "Rechazar la solicitud", texto: "El motivo es obligatorio y lo verá quien hizo la solicitud.", boton: "Rechazar", motivo: true });
     if (!motivo) return;
     cambios.motivo_rechazo = motivo;
+  } else {
+    const [titulo, texto] = etapa === "ito"
+      ? ["Dar V°B° a la solicitud", "Pasa al Director de Obras para su aprobación."]
+      : ["Aprobar la solicitud", "Queda aprobada y el ITO podrá tramitarla con la empresa."];
+    if (!await confirmar({ titulo, texto, boton: estado === "visada" ? "Dar V°B°" : "Aprobar" })) return;
   }
   const { error } = await sb.from("solicitud").update(cambios).eq("id", id);
   if (error) { alert("No se pudo actualizar la solicitud: " + error.message); return; }
@@ -1393,13 +1469,42 @@ async function subirArchivo(bucket, file) {
   return { url: sb.storage.from(bucket).getPublicUrl(ruta).data.publicUrl };
 }
 
+// Los depósitos son privados: el enlace guardado en la base se cambia por uno
+// temporal firmado (2 min) justo al hacer clic. Solo se aceptan archivos de
+// nuestro propio Supabase; cualquier otra dirección se rechaza.
+function _rutaArchivo(url) {
+  try {
+    const u = new URL(url);
+    if (u.origin !== new URL(SUPABASE_URL).origin) return null;
+    const m = u.pathname.match(/^\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/);
+    return m ? { bucket: m[1], ruta: decodeURIComponent(m[2]) } : null;
+  } catch { return null; }
+}
+
+async function abrirArchivo(url) {
+  const r = _rutaArchivo(url);
+  if (!r) { alert("Enlace de archivo no válido."); return; }
+  const w = window.open("", "_blank");
+  if (w) w.opener = null;
+  const { data, error } = await sb.storage.from(r.bucket).createSignedUrl(r.ruta, 120);
+  const destino = data?.signedUrl || (error ? null : url);
+  if (!destino) { if (w) w.close(); alert("No se pudo abrir el archivo (¿sin permiso?)."); return; }
+  if (w) w.location.href = destino; else window.location.href = destino;
+}
+
+// Texto: HTML ya escapado por quien llama. La dirección va escapada y validada.
+function enlaceArchivo(url, texto) {
+  if (!url || !_rutaArchivo(url)) return "—";
+  return `<a href="#" data-url="${esc(url)}" onclick="abrirArchivo(this.dataset.url); return false;">${texto}</a>`;
+}
+
 // ---------- Listado de expedientes ----------
 async function vistaExpedientes(filtroUnidad) {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
   const [{ data: solsTodas, error }, { data: guias }, { data: facturas }] = await Promise.all([
-    sb.from("solicitud").select("*, unidad(nombre)").order("creado_en", { ascending: false }),
-    sb.from("guia_despacho").select("solicitud_id, monto_bruto"),
-    sb.from("factura").select("solicitud_id, monto_bruto"),
+    cargarTodas(() => sb.from("solicitud").select("*, unidad(nombre)").order("creado_en", { ascending: false }).order("id")),
+    cargarTodas(() => sb.from("guia_despacho").select("solicitud_id, monto_bruto").order("id")),
+    cargarTodas(() => sb.from("factura").select("solicitud_id, monto_bruto").order("id")),
   ]);
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
@@ -1411,9 +1516,13 @@ async function vistaExpedientes(filtroUnidad) {
       <h3 style="margin-top:0">Expedientes de solicitudes</h3>
       <p class="hint">Cada solicitud reúne su hoja, las guías de despacho y la factura. Haz clic para abrir el expediente.</p>
       ${filtroUnidad ? `<p class="hint">Filtrado por unidad: <strong>${esc(filtroUnidad)}</strong> · <a href="#" onclick="vistaExpedientes();return false;">quitar filtro</a></p>` : ""}
-      <table>
-        <tr><th>N°</th><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Guías</th><th>Factura</th><th class="num">Total bruto</th><th></th></tr>
-        ${(sols || []).map(s => {
+      ${listaBarra("exp", ESTADOS_SOLICITUD)}
+    </div>
+  `;
+  listaCrear("exp", sols || [],
+    (s) => `${numSol(s)} ${s.motivo} ${s.unidad?.nombre} ${s.solicitante} ${s.fecha_solicitud}`,
+    `<tr><th>N°</th><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Guías</th><th>Factura</th><th class="num">Total bruto</th><th></th></tr>`,
+    (s) => {
           const g = cuenta(guias, s.id);
           const f = cuenta(facturas, s.id);
           const totalBruto = f.length ? f.reduce((a, x) => a + Number(x.monto_bruto || 0), 0)
@@ -1429,10 +1538,8 @@ async function vistaExpedientes(filtroUnidad) {
             <td class="num">${totalBruto ? money(totalBruto) : "—"}</td>
             <td><button class="secundario" onclick="abrirExpediente('${s.id}')">Abrir</button></td>
           </tr>`;
-        }).join("")}
-      </table>
-    </div>
-  `;
+    });
+  listaPintar("exp");
 }
 
 function abrirExpediente(id) { editarFacturaId = null; vistaExpediente(id); }
@@ -1521,8 +1628,8 @@ async function vistaExpediente(id) {
         <div><div class="d-k">Contacto</div>${esc(s.contacto) || "—"}</div>
         <div><div class="d-k">Supervisa ejecución</div>${esc(s.supervisor) || "—"}</div>
         <div><div class="d-k">Ubicación de uso</div>${esc(s.ubicacion) || "—"}</div>
-        <div><div class="d-k">Memo de solicitud</div>${s.memo_url ? `<a href="${s.memo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
-        <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Memo de solicitud</div>${s.memo_url ? `${enlaceArchivo(s.memo_url, `ver`)}` : "sin adjunto"}</div>
+        <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `${enlaceArchivo(s.resp_fotografico_url, `ver`)}` : "sin adjunto"}</div>
         ${s.estado === "rechazada" && s.motivo_rechazo ? `<div><div class="d-k">Motivo del rechazo</div>${esc(s.motivo_rechazo)}</div>` : ""}
       </div>
 
@@ -1570,10 +1677,10 @@ async function vistaExpediente(id) {
       </p>
       <p class="hint" style="margin-top:0.3rem">
         ${[
-          s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver fotografías</a>` : null,
-          s.resp_informe_url ? `<a href="${s.resp_informe_url}" target="_blank" rel="noopener">ver informe técnico</a>` : null,
-          s.resp_presupuesto_url ? `<a href="${s.resp_presupuesto_url}" target="_blank" rel="noopener">ver presupuesto</a>` : null,
-          s.cdp_negativo_url ? `<a href="${s.cdp_negativo_url}" target="_blank" rel="noopener">ver justificación CDP negativo</a>` : null,
+          s.resp_fotografico_url ? `${enlaceArchivo(s.resp_fotografico_url, `ver fotografías`)}` : null,
+          s.resp_informe_url ? `${enlaceArchivo(s.resp_informe_url, `ver informe técnico`)}` : null,
+          s.resp_presupuesto_url ? `${enlaceArchivo(s.resp_presupuesto_url, `ver presupuesto`)}` : null,
+          s.cdp_negativo_url ? `${enlaceArchivo(s.cdp_negativo_url, `ver justificación CDP negativo`)}` : null,
         ].filter(Boolean).join(" · ")}
       </p>
 
@@ -1593,7 +1700,7 @@ async function vistaExpediente(id) {
         <div class="exp-seccion"><h4>Cotizaciones que respaldan la compra</h4>
           <span class="hint">${esc(procExp.correlativo)} · enviada el ${fechaCL(procExp.fecha_envio)}</span></div>
         ${comparativoHTML(procExp, ofertasExp)}
-        <p class="hint">${ofertasExp.filter(o => o.archivo_url).map(o => `<a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">Cotización ${esc(o.proveedor)}</a>`).join(" · ") || "Sin archivos adjuntos."}</p>
+        <p class="hint">${ofertasExp.filter(o => o.archivo_url).map(o => `${enlaceArchivo(o.archivo_url, `Cotización ${esc(o.proveedor)}`)}`).join(" · ") || "Sin archivos adjuntos."}</p>
       </div>` : ""}
 
     ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : ""}
@@ -1611,7 +1718,7 @@ async function vistaExpediente(id) {
             <td class="num">${money(g.monto_neto)}</td>
             <td class="num">${money(g.iva)}</td>
             <td class="num">${money(g.monto_bruto)}</td>
-            <td>${g.archivo_url ? `<a href="${g.archivo_url}" target="_blank" rel="noopener">ver</a>` : "—"}</td>
+            <td>${g.archivo_url ? `${enlaceArchivo(g.archivo_url, `ver`)}` : "—"}</td>
             <td>${g.anulado
                   ? `<span class="hint" title="${esc(g.anulado_motivo)}">motivo ⓘ</span>`
                   : (opero ? `<button class="secundario" onclick="anularGuia('${g.id}','${s.id}')">Anular</button>` : "")}</td>
@@ -1672,7 +1779,7 @@ async function vistaExpediente(id) {
           <div><div class="d-k">IVA</div>${money(factura.iva)}</div>
           <div><div class="d-k">Bruto</div>${money(factura.monto_bruto)}</div>
           <div><div class="d-k">Fecha de pago</div>${factura.fecha_pago || "—"}</div>
-          <div><div class="d-k">Adjunto</div>${factura.archivo_url ? `<a href="${factura.archivo_url}" target="_blank" rel="noopener">ver factura</a>` : "sin adjunto"}</div>
+          <div><div class="d-k">Adjunto</div>${factura.archivo_url ? `${enlaceArchivo(factura.archivo_url, `ver factura`)}` : "sin adjunto"}</div>
         </div>
         ${!facturaDescontada ? `<p class="hint" style="color:var(--warn)">⚠ Esta factura todavía no se descontó del convenio (el Resumen no la refleja).</p>` : ""}
         ${opero ? `
@@ -1820,7 +1927,7 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
             <td class="num">${money(c.monto_neto)}</td>
             <td class="num">${money(c.iva)}</td>
             <td class="num">${money(c.monto_bruto)}</td>
-            <td>${c.archivo_url ? `<a href="${c.archivo_url}" target="_blank" rel="noopener">ver</a>` : "—"}</td>
+            <td>${c.archivo_url ? `${enlaceArchivo(c.archivo_url, `ver`)}` : "—"}</td>
           </tr>`).join("")}
         </table>
       ` : `<p class="hint">Aún no se registra ninguna cotización. Descarga la solicitud de cotización de arriba y envíala a la(s) empresa(s).</p>`}
@@ -1853,10 +1960,10 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
       <div class="exp-datos">
         <div><div class="d-k">N° decreto</div>${esc(s.n_decreto) || "—"}</div>
         <div><div class="d-k">Fecha decreto</div>${s.fecha_decreto || "—"}</div>
-        <div><div class="d-k">Decreto</div>${s.decreto_url ? `<a href="${esc(s.decreto_url)}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Decreto</div>${s.decreto_url ? `${enlaceArchivo(s.decreto_url, `ver documento`)}` : "sin adjunto"}</div>
         <div><div class="d-k">N° orden de compra</div>${esc(s.n_orden_compra) || "—"}</div>
         <div><div class="d-k">Fecha OC</div>${s.fecha_oc || "—"}</div>
-        <div><div class="d-k">Orden de compra</div>${s.oc_url ? `<a href="${esc(s.oc_url)}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Orden de compra</div>${s.oc_url ? `${enlaceArchivo(s.oc_url, `ver documento`)}` : "sin adjunto"}</div>
       </div>
 
       ${opero ? `
@@ -1884,17 +1991,17 @@ function bloqueCompraEspecial(s, cotizaciones, opero) {
     <div class="card">
       <div class="exp-seccion"><h4>Justificaciones obligatorias (fuera de catálogo · Manual, punto 10)</h4></div>
       <div class="exp-datos">
-        <div><div class="d-k">Justificación Unidad Jurídica</div>${s.just_juridica_url ? `<a href="${s.just_juridica_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
-        <div><div class="d-k">Justificación DAF</div>${s.just_daf_url ? `<a href="${s.just_daf_url}" target="_blank" rel="noopener">ver documento</a>` : "sin adjunto"}</div>
+        <div><div class="d-k">Justificación Unidad Jurídica</div>${s.just_juridica_url ? `${enlaceArchivo(s.just_juridica_url, `ver documento`)}` : "sin adjunto"}</div>
+        <div><div class="d-k">Justificación DAF</div>${s.just_daf_url ? `${enlaceArchivo(s.just_daf_url, `ver documento`)}` : "sin adjunto"}</div>
       </div>
       ${s.cdp_negativo ? `
         <p class="hint" style="color:var(--warn);margin-top:.8rem">⚠ CDP negativo (Manual, punto 8): además se adjunta CDP negativo,
           justificación reforzada, respaldo fotográfico y pronunciamiento de la Unidad Jurídica.</p>
         <div class="exp-datos">
-          <div><div class="d-k">CDP negativo</div>${s.cdp_negativo_url ? `<a href="${s.cdp_negativo_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
-          <div><div class="d-k">Justificación reforzada</div>${s.just_reforzada_url ? `<a href="${s.just_reforzada_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
-          <div><div class="d-k">Pronunciamiento Jurídica</div>${s.pronunciamiento_juridica_url ? `<a href="${s.pronunciamiento_juridica_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
-          <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `<a href="${s.resp_fotografico_url}" target="_blank" rel="noopener">ver</a>` : "sin adjunto"}</div>
+          <div><div class="d-k">CDP negativo</div>${s.cdp_negativo_url ? `${enlaceArchivo(s.cdp_negativo_url, `ver`)}` : "sin adjunto"}</div>
+          <div><div class="d-k">Justificación reforzada</div>${s.just_reforzada_url ? `${enlaceArchivo(s.just_reforzada_url, `ver`)}` : "sin adjunto"}</div>
+          <div><div class="d-k">Pronunciamiento Jurídica</div>${s.pronunciamiento_juridica_url ? `${enlaceArchivo(s.pronunciamiento_juridica_url, `ver`)}` : "sin adjunto"}</div>
+          <div><div class="d-k">Respaldo fotográfico</div>${s.resp_fotografico_url ? `${enlaceArchivo(s.resp_fotografico_url, `ver`)}` : "sin adjunto"}</div>
         </div>` : ""}
 
       ${opero ? `
@@ -2020,6 +2127,12 @@ function recalcMontos(pref) {
 }
 
 async function avanzarEstado(id, estado) {
+  const paso = {
+    enviada: ["Marcar como enviada", "La hoja de solicitud se da por enviada a la empresa."],
+    recibida: ["Marcar material recibido", "Confirma que el material llegó. Registra antes las guías de despacho."],
+    cerrada: ["Cerrar el expediente", "Una vez cerrado el expediente no se agregan más documentos."],
+  }[estado];
+  if (paso && !await confirmar({ titulo: paso[0], texto: paso[1], boton: "Confirmar" })) return;
   await sb.from("solicitud").update({ estado }).eq("id", id);
   actualizarNotificaciones();
   vistaExpediente(id);
@@ -2072,17 +2185,17 @@ async function guardarFactura(solicitudId) {
 
   const iva = parseFloat(document.getElementById("fc-iva").value) || calcIva(monto_neto);
   const monto_bruto = parseFloat(document.getElementById("fc-bruto").value) || (monto_neto + iva);
-  const { error } = await sb.from("factura").insert({
+  const { data: nueva, error } = await sb.from("factura").insert({
     solicitud_id: solicitudId, numero, fecha,
     monto_neto, iva, monto_bruto,
     fecha_pago: document.getElementById("fc-pago").value || null,
     archivo_url: url,
     creado_por: perfilActual.id,
-  });
+  }).select("id").single();
   if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
 
   await sb.from("solicitud").update({ estado: "facturada" }).eq("id", solicitudId);
-  await descontarDelConvenio(solicitudId, numero, monto_bruto);
+  await descontarDelConvenio(nueva.id);
   vistaExpediente(solicitudId);
   } finally { _unlock(); }
 }
@@ -2090,31 +2203,19 @@ async function guardarFactura(solicitudId) {
 // Descuenta del saldo del convenio: registra la factura en `compra` con su
 // monto bruto; el trigger trg_compra_movimiento crea el movimiento_saldo.
 // Devuelve true si quedó descontada.
-async function descontarDelConvenio(solicitudId, numero, monto_bruto) {
-  const { data: contrato } = await sb.from("contrato").select("id, monto_tope_anual")
-    .eq("estado", "vigente").order("creado_en", { ascending: false }).limit(1).maybeSingle();
-  if (!contrato || !contrato.monto_tope_anual) {
-    alert("No hay un contrato vigente con monto tope anual cargado — no se pudo descontar del convenio. Revísalo en 'Convenio / ferretería'.");
+// El monto sale de la factura ya registrada, lo calcula la función de la base
+// (descontar_factura): el navegador ya no escribe en `compra`.
+async function descontarDelConvenio(facturaId) {
+  const { data, error } = await sb.rpc("descontar_factura", { p_factura_id: facturaId });
+  if (error) {
+    alert("No se pudo descontar del convenio: " + error.message + "\nRevísalo en el Resumen.");
     return false;
   }
-  const { error: errCompra } = await sb.from("compra").insert({
-    contrato_id: contrato.id,
-    solicitud_id: solicitudId,
-    n_oc: "FACT " + numero,
-    monto_total: monto_bruto,
-    creado_por: perfilActual.id,
-  });
-  if (errCompra) {
-    alert("No se pudo descontar del convenio: " + errCompra.message + "\nRevísalo en el Resumen.");
-    return false;
-  }
-  return true;
+  return data?.descontado !== false || /ya estaba/i.test(data?.motivo || "");
 }
 
 async function reintentarDescuentoFactura(solicitudId, facturaId) {
-  const { data: factura, error } = await sb.from("factura").select("numero, monto_bruto").eq("id", facturaId).single();
-  if (error || !factura) { alert("No se pudo leer la factura: " + (error ? error.message : "no existe")); return; }
-  const ok = await descontarDelConvenio(solicitudId, factura.numero, factura.monto_bruto);
+  const ok = await descontarDelConvenio(facturaId);
   if (ok) alert("Listo, se descontó del convenio.");
   vistaExpediente(solicitudId);
 }
@@ -2125,12 +2226,8 @@ async function reintentarDescuentoFactura(solicitudId, facturaId) {
 // navegador: nada de borrar movimientos ni recalcular la cadena a mano.
 
 // Pide un motivo obligatorio. Devuelve el texto, o null si el usuario cancela.
-function _pedirMotivo(titulo) {
-  const raw = prompt(titulo + "\n(el motivo queda en la bitácora)");
-  if (raw === null) return null;
-  const motivo = raw.trim();
-  if (!motivo) { alert("El motivo es obligatorio."); return null; }
-  return motivo;
+async function _pedirMotivo(titulo, ayuda) {
+  return confirmar({ titulo, texto: (ayuda ? ayuda + " " : "") + "El motivo queda en la bitácora.", boton: "Anular", motivo: true });
 }
 
 // ---------- Editar / anular factura (correcciones de digitación) ----------
@@ -2176,7 +2273,7 @@ async function actualizarFactura(solicitudId, facturaId) {
 // public.anular_factura() en una transacción; acá solo se pide el motivo
 // y se repone el estado de la solicitud.
 async function anularFactura(solicitudId, facturaId) {
-  const motivo = _pedirMotivo("Motivo de la anulación de la factura (ej: dígito mal ingresado, monto equivocado):");
+  const motivo = await _pedirMotivo("Anular la factura", "Ej: dígito mal ingresado, monto equivocado. Si ya se descontó, el convenio se revierte.");
   if (!motivo) return;
   if (!_lock()) return;
   try {
@@ -2196,7 +2293,7 @@ async function anularFactura(solicitudId, facturaId) {
 // Anula una guía de despacho mal cargada (no se borra; queda en la bitácora).
 // La guía no descuenta del convenio, así que basta con marcarla.
 async function anularGuia(id, solicitudId) {
-  const motivo = _pedirMotivo("Motivo de la anulación de la guía (ej: N° o monto mal ingresado):");
+  const motivo = await _pedirMotivo("Anular la guía de despacho", "Ej: N° o monto mal ingresado.");
   if (!motivo) return;
   const { error } = await sb.from("guia_despacho").update({
     anulado: true, anulado_por: perfilActual.id,
@@ -2223,7 +2320,7 @@ function bloqueNotasCredito(s, factura, notas, opero) {
             <td class="num">${money(n.monto_neto)}</td>
             <td class="num">${money(n.iva)}</td>
             <td class="num">${money(n.monto_bruto)}</td>
-            <td>${n.archivo_url ? `<a href="${n.archivo_url}" target="_blank" rel="noopener">ver</a>` : "—"}</td>
+            <td>${n.archivo_url ? `${enlaceArchivo(n.archivo_url, `ver`)}` : "—"}</td>
             <td>${n.anulado
                   ? `<span class="hint" title="${esc(n.anulado_motivo)}">motivo ⓘ</span>`
                   : (opero ? `<button class="secundario" onclick="anularNotaCredito('${n.id}','${s.id}')">Anular</button>` : "")}</td>
@@ -2287,7 +2384,7 @@ async function guardarNotaCredito(solicitudId, facturaId) {
 }
 
 async function anularNotaCredito(id, solicitudId) {
-  const motivo = _pedirMotivo("Motivo de la anulación de la nota de crédito:");
+  const motivo = await _pedirMotivo("Anular la nota de crédito");
   if (!motivo) return;
   const { error } = await sb.from("nota_credito").update({
     anulado: true, anulado_por: perfilActual.id,
@@ -2553,7 +2650,7 @@ async function vistaConvenio() {
 
     const btnQuitar = card.querySelector(".firma-quitar");
     if (btnQuitar) btnQuitar.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar esta firma? La hoja de solicitud dejará de estamparla.")) return;
+      if (!await confirmar({ titulo: "¿Eliminar esta firma?", texto: "La hoja de solicitud dejará de estamparla.", boton: "Eliminar" })) return;
       const { error } = await sb.storage.from("firmas").remove([archivo]);
       if (error) { alert("No se pudo eliminar: " + error.message); return; }
       vistaConvenio();
@@ -2756,9 +2853,12 @@ function pintarOfertasExt() {
         ${procesoItems.map((it, i) => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
           <td class="num"><input class="ne-precio" data-i="${i}" type="number" min="0" step="1" value="${esc(o.precios[i] ?? "")}" style="width:7rem;text-align:right"></td></tr>`).join("")}
       </table>` : `<p class="hint">Agrega los productos para anotar los precios.</p>`}
-      <label>PDF de la cotización ${o.archivo_url ? `· <a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">ver adjunto actual</a>` : ""}</label>
+      <label>PDF de la cotización ${o.archivo_url ? `· ${enlaceArchivo(o.archivo_url, `ver adjunto actual`)}` : ""}</label>
       <input class="ne-file" type="file" accept=".pdf,.doc,.docx,image/*">
       <p class="hint ne-file-msg">${o.file ? "Archivo elegido: " + esc(o.file.name) : (o.archivo_url ? "Ya hay un archivo adjunto; elige otro solo si quieres reemplazarlo." : "Adjunta la cotización recibida del proveedor.")}</p>
+      ${procesoItems.length ? `<label>…o carga los precios desde el formulario que completó el proveedor</label>
+      <input class="ne-form" type="file" accept="application/pdf">
+      <p class="hint ne-form-msg">${esc(o.msgForm || "Lee el valor neto de cada producto del formulario de cotización que te devolvió el proveedor.")}</p>` : ""}
     </div>`;
   }).join("");
   cont.querySelectorAll("[data-slot]").forEach(card => {
@@ -2770,6 +2870,17 @@ function pintarOfertasExt() {
     card.querySelector(".ne-file").addEventListener("change", e => {
       o.file = e.target.files[0] || null;
       card.querySelector(".ne-file-msg").textContent = o.file ? "Archivo elegido: " + o.file.name : "Adjunta la cotización recibida del proveedor.";
+    });
+    const inpForm = card.querySelector(".ne-form");
+    if (inpForm) inpForm.addEventListener("change", async e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      try {
+        const r = await preciosDesdeFormulario(f, procesoItems);
+        if (r.leidos) o.precios = r.precios;
+        o.msgForm = mensajePreciosFormulario(r);
+      } catch (err) { o.msgForm = "No se pudo leer el PDF: " + err.message; }
+      pintarOfertasExt();
     });
   });
 }
@@ -2786,7 +2897,7 @@ async function extraerFormularioPDF(file) {
   for (let r = 1; r <= 20; r++) {
     const producto = T(`producto_${r}`);
     const cantidad = num(T(`cantidad_${r}`));
-    if (producto && cantidad > 0) items.push({ producto, cantidad, unidad: T(`unidad_${r}`) });
+    if (producto && cantidad > 0) items.push({ producto, cantidad, unidad: T(`unidad_${r}`), precio: num(T(`valor_neto_${r}`)) });
   }
   // …o, si no es ese, el Formulario Único anterior (mat_rN_cK).
   if (!items.length) {
@@ -2803,6 +2914,30 @@ async function extraerFormularioPDF(file) {
     motivo: T("motivo") || T("fundamento") || T("desc_requerimiento"),
     items,
   };
+}
+
+// Lee los valores netos de un formulario que completó un proveedor y los alinea con los
+// productos de la solicitud (primero por nombre; si no calza, por posición).
+async function preciosDesdeFormulario(file, items) {
+  if (!window.PDFLib) throw new Error("no se cargó el lector de PDF (revisa la conexión)");
+  const d = await extraerFormularioPDF(file);
+  const norm = (t) => (t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const precios = items.map(() => "");
+  let leidos = 0, sinCalzar = 0;
+  d.items.forEach((it, i) => {
+    if (!(it.precio > 0)) return;
+    let idx = items.findIndex(x => norm(x.producto) === norm(it.producto));
+    if (idx < 0 && items[i]) { idx = i; sinCalzar++; }
+    if (idx >= 0) { precios[idx] = it.precio; leidos++; }
+  });
+  return { precios, leidos, sinCalzar, sinPrecio: items.length - leidos };
+}
+
+function mensajePreciosFormulario(r) {
+  if (!r.leidos) return "No se encontraron valores netos en ese PDF. ¿El proveedor lo completó y lo guardó con el botón de descarga (no con «Imprimir a PDF»)?";
+  return `Se leyeron ${r.leidos} precio(s).` +
+    (r.sinCalzar ? ` ${r.sinCalzar} se asignaron por posición porque el nombre del producto no coincide: revísalos.` : "") +
+    (r.sinPrecio ? ` Faltan ${r.sinPrecio} producto(s) sin valor neto.` : "");
 }
 
 async function leerFormularioProceso(file) {
@@ -3019,8 +3154,11 @@ async function vistaProceso(id) {
         ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
           <td class="num"><input class="of-precio" data-item="${it.id}" type="number" min="0" step="1" value="${o && (o.precios || {})[it.id] ? o.precios[it.id] : ""}" ${editable ? "" : "disabled"} style="width:7rem;text-align:right"></td></tr>`).join("")}
       </table>
-      <label>PDF de la cotización ${o && o.archivo_url ? `· <a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">ver adjunto actual</a>` : `<span class="hint">(recomendado: queda como respaldo)</span>`}</label>
+      <label>PDF de la cotización ${o && o.archivo_url ? `· ${enlaceArchivo(o.archivo_url, `ver adjunto actual`)}` : `<span class="hint">(recomendado: queda como respaldo)</span>`}</label>
       ${editable ? `<input class="of-file" type="file" accept=".pdf,.doc,.docx,image/*">
+        <label>…o carga los precios desde el formulario que completó el proveedor</label>
+        <input class="of-form" type="file" accept="application/pdf" onchange="cargarPreciosEnTarjeta(${s.slot}, this)">
+        <p class="hint of-form-msg">Lee el valor neto de cada producto del formulario de cotización que te devolvió el proveedor. Después pulsa «Guardar esta cotización».</p>
         <button class="primario" onclick="guardarOferta('${p.id}', ${s.slot})">Guardar esta cotización</button>
         <p class="error oculto of-error"></p>` : ""}
     </div>`;
@@ -3072,7 +3210,7 @@ async function vistaProceso(id) {
       <div class="card">
         <h4 style="margin-top:0">Cotizaciones externas recibidas (${[2, 3].filter(s => totalOferta(items, por[s])).length} de 2 completas)</h4>
         ${(ofertas || []).length ? comparativoHTML(p, ofertas) : `<p class="hint">Aún no hay cotizaciones externas registradas.</p>`}
-        <p class="hint">${(ofertas || []).filter(o => o.archivo_url).map(o => `<a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">Cotización ${esc(o.proveedor)}</a>`).join(" · ")}</p>
+        <p class="hint">${(ofertas || []).filter(o => o.archivo_url).map(o => `${enlaceArchivo(o.archivo_url, `Cotización ${esc(o.proveedor)}`)}`).join(" · ")}</p>
       </div>` : ""}
 
     ${p.estado !== "borrador" ? `
@@ -3103,6 +3241,7 @@ async function emitirProceso(id) {
   try {
     const prov = (document.getElementById("pc-prov").value || "").trim();
     if (!prov) { alert("Indica el proveedor al que se envía este PDF."); return; }
+    if (!await confirmar({ titulo: "Emitir la solicitud de cotización", texto: `Se genera el PDF firmado para ${prov} y los productos ya no se podrán modificar.`, boton: "Emitir y descargar" })) return;
     const { data, error } = await sb.from("proceso_cotizacion").update({ estado: "emitida" }).eq("id", id).select("*, unidad(nombre)").single();
     if (error) { alert("No se pudo emitir: " + error.message); return; }
     await descargarPdfCotizacion(data, prov);
@@ -3180,6 +3319,25 @@ async function descargarPdfCotizacion(p, proveedor) {
   doc.save(`cotizacion-${p.correlativo || p.id.slice(0, 8)}.pdf`);
 }
 
+// Rellena los precios de una tarjeta con los del formulario que devolvió el proveedor (sin guardar todavía).
+async function cargarPreciosEnTarjeta(slot, input) {
+  const f = input.files[0];
+  if (!f) return;
+  const card = document.getElementById("oferta-" + slot);
+  const msg = card.querySelector(".of-form-msg");
+  try {
+    const items = (window._procActual && window._procActual.p.items) || [];
+    const r = await preciosDesdeFormulario(f, items);
+    if (r.leidos) {
+      card.querySelectorAll(".of-precio").forEach(inp => {
+        const i = items.findIndex(it => it.id === inp.dataset.item);
+        if (i >= 0 && r.precios[i] !== "") inp.value = r.precios[i];
+      });
+    }
+    msg.textContent = mensajePreciosFormulario(r) + (r.leidos ? " Pulsa «Guardar esta cotización» para registrarlos." : "");
+  } catch (err) { msg.textContent = "No se pudo leer el PDF: " + err.message; }
+}
+
 async function guardarOferta(procesoId, slot) {
   if (!_lock()) return;
   try {
@@ -3223,6 +3381,7 @@ async function crearSolicitudDesdeProceso(id) {
     const por = {};
     (ofertas || []).forEach(o => { por[o.slot] = o; });
     if (!SLOTS_COTIZACION.every(s => totalOferta(items, por[s.slot]))) { mostrar("Faltan cotizaciones completas."); return; }
+    if (!await confirmar({ titulo: "Crear la solicitud especial", texto: "Se crea una solicitud con los productos y los precios del proveedor del contrato, y sigue el recorrido normal de aprobación.", boton: "Crear solicitud" })) return;
 
     const porRevisar = rolEfectivo() === "solicitante_obras";
     const payload = {
