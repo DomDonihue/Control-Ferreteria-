@@ -5,10 +5,14 @@
 -- Para productos que NO están en el catálogo del contrato, solo para la
 -- Dirección de Obras (las demás direcciones siguen como estaban):
 --
---   1. Un usuario de Obras (o el ITO) prepara una SOLICITUD DE COTIZACIÓN con
---      los productos (producto, cantidad, unidad)            -> 'borrador'
---   2. El ITO la EMITE (PDF con su firma; queda la fecha de envío) -> 'emitida'
---   3. Se registran a mano las 3 cotizaciones, con el precio de cada producto:
+--   1. Un usuario de Obras (o el ITO) prepara la SOLICITUD DE COTIZACIÓN: sube el
+--      Formulario Único completado (el sistema lee los productos, cantidades y
+--      unidades) y registra las 2 cotizaciones EXTERNAS con su PDF y el precio
+--      de cada producto. Le llega al ITO                       -> 'borrador'
+--   2. El ITO la EMITE (PDF con su firma; queda la fecha de envío) para pedir la
+--      cotización al proveedor del contrato. Solo se puede emitir con las 2
+--      externas registradas                                    -> 'emitida'
+--   3. Cuando Hevia responde, el ITO registra su cotización (la tercera):
 --        1 = proveedor del contrato (Importadora Hevia)
 --        2 y 3 = cotizaciones externas (ferretería local o cadena)
 --   4. Con las 3 registradas se crea la SOLICITUD ESPECIAL, que sigue el mismo
@@ -105,6 +109,9 @@ begin
       if old.estado <> 'borrador' or v_rol not in ('admin', 'admin_ito') then
         raise exception 'Solo el ITO puede emitir la solicitud de cotización.';
       end if;
+      if (select count(*) from proceso_cotizacion_oferta where proceso_id = new.id and slot in (2, 3)) < 2 then
+        raise exception 'Faltan las 2 cotizaciones externas para poder emitir.';
+      end if;
       new.fecha_envio := coalesce(new.fecha_envio, current_date);
       new.emitida_por := auth.uid();
     elsif new.estado = 'solicitud_creada' then
@@ -165,18 +172,18 @@ create policy "oferta ve" on proceso_cotizacion_oferta for select using (
 drop policy if exists "oferta registra" on proceso_cotizacion_oferta;
 create policy "oferta registra" on proceso_cotizacion_oferta for insert with check (
   public.rol_actual() in ('admin', 'admin_ito', 'solicitante_obras')
-  and exists (select 1 from proceso_cotizacion p where p.id = proceso_id and p.estado = 'emitida')
+  and exists (select 1 from proceso_cotizacion p where p.id = proceso_id and p.estado in ('borrador', 'emitida'))
 );
 
 drop policy if exists "oferta corrige" on proceso_cotizacion_oferta;
 create policy "oferta corrige" on proceso_cotizacion_oferta for update
   using (
     public.rol_actual() in ('admin', 'admin_ito', 'solicitante_obras')
-    and exists (select 1 from proceso_cotizacion p where p.id = proceso_id and p.estado = 'emitida')
+    and exists (select 1 from proceso_cotizacion p where p.id = proceso_id and p.estado in ('borrador', 'emitida'))
   )
   with check (
     public.rol_actual() in ('admin', 'admin_ito', 'solicitante_obras')
-    and exists (select 1 from proceso_cotizacion p where p.id = proceso_id and p.estado = 'emitida')
+    and exists (select 1 from proceso_cotizacion p where p.id = proceso_id and p.estado in ('borrador', 'emitida'))
   );
 
 -- Los usuarios de Obras adjuntan el PDF de cada cotización (bucket "memos").

@@ -2711,28 +2711,139 @@ async function vistaProcesosCotizacion() {
 }
 
 // ---------- Crear / editar el borrador ----------
+// El usuario de Obras sube el Formulario Único completado (el sistema lee los
+// productos, cantidades y unidades) y registra las 2 cotizaciones externas con su PDF
+// y el precio de cada producto. Con eso le llega al ITO, que emite el PDF para Hevia.
 let procesoItems = [];
+let procesoIdEnEdicion = null;
+const ofertaVacia = () => ({ proveedor: "", numero: "", fecha: "", archivo_url: null, file: null, precios: [] });
+let procesoExt = { 2: ofertaVacia(), 3: ofertaVacia() };
+
+function quitarItemProceso(i) {
+  procesoItems.splice(i, 1);
+  [2, 3].forEach(s => procesoExt[s].precios.splice(i, 1));
+  pintarItemsProceso();
+}
 
 function pintarItemsProceso() {
   const cont = document.getElementById("np-items");
   if (!cont) return;
-  if (!procesoItems.length) { cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas productos.</p>"; return; }
-  cont.innerHTML = `<table>
+  cont.innerHTML = !procesoItems.length
+    ? "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas productos.</p>"
+    : `<table>
     <tr><th>Producto</th><th class="num">Cantidad</th><th>Unidad</th><th></th></tr>
     ${procesoItems.map((it, i) => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
-      <td><button class="secundario" onclick="procesoItems.splice(${i},1);pintarItemsProceso()">Quitar</button></td></tr>`).join("")}
+      <td><button class="secundario" onclick="quitarItemProceso(${i})">Quitar</button></td></tr>`).join("")}
   </table>`;
+  pintarOfertasExt();
+}
+
+// Tarjetas de las 2 cotizaciones externas (proveedor, datos, precio por producto y PDF).
+function pintarOfertasExt() {
+  const cont = document.getElementById("np-ofertas");
+  if (!cont) return;
+  cont.innerHTML = [2, 3].map(slot => {
+    const o = procesoExt[slot];
+    return `<div class="card" style="margin-top:.8rem" data-slot="${slot}">
+      <div class="exp-seccion"><h4>${SLOTS_COTIZACION[slot - 1].titulo}</h4></div>
+      <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr">
+        <div><label>Proveedor</label><input class="ne-prov" value="${esc(o.proveedor)}" placeholder="Ferretería o empresa" autocomplete="off"></div>
+        <div><label>N° de cotización</label><input class="ne-num" value="${esc(o.numero)}"></div>
+        <div><label>Fecha</label><input class="ne-fecha" type="date" value="${esc(o.fecha)}"></div>
+      </div>
+      ${procesoItems.length ? `<table>
+        <tr><th>Producto</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Precio unitario neto</th></tr>
+        ${procesoItems.map((it, i) => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
+          <td class="num"><input class="ne-precio" data-i="${i}" type="number" min="0" step="1" value="${esc(o.precios[i] ?? "")}" style="width:7rem;text-align:right"></td></tr>`).join("")}
+      </table>` : `<p class="hint">Agrega los productos para anotar los precios.</p>`}
+      <label>PDF de la cotización ${o.archivo_url ? `· <a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">ver adjunto actual</a>` : ""}</label>
+      <input class="ne-file" type="file" accept=".pdf,.doc,.docx,image/*">
+      <p class="hint ne-file-msg">${o.file ? "Archivo elegido: " + esc(o.file.name) : (o.archivo_url ? "Ya hay un archivo adjunto; elige otro solo si quieres reemplazarlo." : "Adjunta la cotización recibida del proveedor.")}</p>
+    </div>`;
+  }).join("");
+  cont.querySelectorAll("[data-slot]").forEach(card => {
+    const o = procesoExt[Number(card.dataset.slot)];
+    card.querySelector(".ne-prov").addEventListener("input", e => { o.proveedor = e.target.value; });
+    card.querySelector(".ne-num").addEventListener("input", e => { o.numero = e.target.value; });
+    card.querySelector(".ne-fecha").addEventListener("input", e => { o.fecha = e.target.value; });
+    card.querySelectorAll(".ne-precio").forEach(inp => inp.addEventListener("input", e => { o.precios[Number(e.target.dataset.i)] = e.target.value; }));
+    card.querySelector(".ne-file").addEventListener("change", e => {
+      o.file = e.target.files[0] || null;
+      card.querySelector(".ne-file-msg").textContent = o.file ? "Archivo elegido: " + o.file.name : "Adjunta la cotización recibida del proveedor.";
+    });
+  });
+}
+
+// Lee el Formulario Único (PDF editable) ya completado: datos y productos (producto, cantidad, unidad).
+async function extraerFormularioPDF(file) {
+  const doc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
+  const form = doc.getForm();
+  const T = (n) => { try { return (form.getTextField(n).getText() || "").trim(); } catch { return ""; } };
+  const num = (v) => parseFloat(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) || 0;
+  const items = [];
+  for (let r = 0; r < 12; r++) {
+    const producto = T(`mat_r${r}_c0`);
+    const cantidad = num(T(`mat_r${r}_c1`));
+    if (producto && cantidad > 0) items.push({ producto, cantidad, unidad: T(`mat_r${r}_c2`) });
+  }
+  return {
+    unidad: T("unidad_solicitante"), responsable: T("responsable_requerimiento"),
+    ubicacion: T("ubicacion_uso"), motivo: T("fundamento") || T("desc_requerimiento"), items,
+  };
+}
+
+async function leerFormularioProceso(file) {
+  const msg = document.getElementById("np-pdf-msg");
+  if (!window.PDFLib) { msg.textContent = "No se pudo cargar el lector de PDF (revisa la conexión)."; return; }
+  msg.textContent = "Leyendo el PDF…";
+  try {
+    const d = await extraerFormularioPDF(file);
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    set("np-resp", d.responsable); set("np-ubic", d.ubicacion); set("np-motivo", d.motivo);
+
+    const norm = (t) => (t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const uTxt = norm(d.unidad);
+    if (uTxt) {
+      const calza = (sel, texto) => [...sel.options].find(o => o.value && (norm(texto(o)).includes(uTxt) || uTxt.includes(norm(texto(o)))));
+      const interna = calza(document.getElementById("np-interna"), o => o.value);
+      if (interna) document.getElementById("np-interna").value = interna.value;
+      const dir = document.getElementById("np-unidad");
+      if (!dir.disabled) { const o2 = calza(dir, o => o.textContent); if (o2) dir.value = o2.value; }
+    }
+    if (d.items.length) {
+      procesoItems = d.items.map(it => ({ producto: it.producto, cantidad: it.cantidad, unidad: it.unidad || "un" }));
+      [2, 3].forEach(s => { procesoExt[s].precios = []; });
+      pintarItemsProceso();
+    }
+    const sinUnidad = d.items.filter(it => !it.unidad).length;
+    msg.textContent = d.items.length
+      ? `Se leyeron ${d.items.length} producto(s) del formulario.${sinUnidad ? ` ${sinUnidad} venía(n) sin unidad de medida: quedó "un", corrígela si es otra.` : ""} Revisa los datos y anota los precios de las cotizaciones.`
+      : "No se encontraron productos en el formulario. Agrégalos a mano.";
+  } catch (e) {
+    msg.textContent = "No se pudo leer el PDF: " + e.message + ". Llena el formulario a mano.";
+  }
 }
 
 async function vistaNuevoProceso(id) {
   procesoItems = [];
+  procesoIdEnEdicion = id || null;
+  procesoExt = { 2: ofertaVacia(), 3: ofertaVacia() };
   let p = null;
   if (id) {
-    const { data, error } = await sb.from("proceso_cotizacion").select("*").eq("id", id).single();
+    const [{ data, error }, { data: ofs }] = await Promise.all([
+      sb.from("proceso_cotizacion").select("*").eq("id", id).single(),
+      sb.from("proceso_cotizacion_oferta").select("*").eq("proceso_id", id),
+    ]);
     if (error || !data) { vista().innerHTML = `<div class="card error">No se pudo abrir la cotización${error ? ": " + esc(error.message) : ""}</div>`; return; }
     if (data.estado !== "borrador") { vistaProceso(id); return; }
     p = data;
     procesoItems = (p.items || []).map(it => ({ producto: it.producto, cantidad: it.cantidad, unidad: it.unidad }));
+    (ofs || []).filter(o => o.slot === 2 || o.slot === 3).forEach(o => {
+      procesoExt[o.slot] = {
+        proveedor: o.proveedor || "", numero: o.numero || "", fecha: o.fecha || "", archivo_url: o.archivo_url || null, file: null,
+        precios: procesoItems.map((_, i) => (o.precios || {})["i" + (i + 1)] ?? ""),
+      };
+    });
   }
   const { data: todas } = await sb.from("unidad").select("id, nombre").order("nombre");
   const soloObras = rolEfectivo() === "solicitante_obras";
@@ -2743,8 +2854,14 @@ async function vistaNuevoProceso(id) {
     <button class="exp-volver" onclick="vistaProcesosCotizacion()">← Volver a Cotización Obras</button>
     <div class="card">
       <h3 style="margin-top:0">${p ? "Editar" : "Nueva"} solicitud de cotización${p ? " " + esc(p.correlativo) : ""}</h3>
-      <p class="hint">Escribe los productos que necesitas y no están en el catálogo. Luego el ITO la emite (PDF firmado) y tú pides las cotizaciones a los proveedores.</p>
+      <p class="hint">Para productos que no están en el catálogo. Sube el formulario con los productos, adjunta las cotizaciones de los 2 proveedores externos y envíalo al ITO: él pide la cotización a Hevia (proveedor del contrato) con el PDF firmado.</p>
       ${soloObras && !unidades.length ? `<p class="error">Tu perfil no tiene una dirección asignada. Pide al administrador que te la asigne en Usuarios.</p>` : ""}
+
+      <div style="border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin:12px 0;background:var(--surface-2)">
+        <label style="margin-top:0">¿Ya completaste el Formulario Único en PDF? Súbelo y se leen los productos</label>
+        <input id="np-pdf" type="file" accept="application/pdf">
+        <p class="hint" id="np-pdf-msg">Toma de ahí los productos, cantidades y unidades de medida (también la unidad, el responsable, la ubicación y el motivo). Después puedes corregir lo que haga falta.</p>
+      </div>
 
       <label>Dirección responsable</label>
       <select id="np-unidad" ${soloObras ? "disabled" : ""}>
@@ -2775,11 +2892,16 @@ async function vistaNuevoProceso(id) {
       </div>
       <p class="error oculto" id="np-msg"></p>
 
-      <button class="primario" id="np-guardar">${p ? "Guardar cambios" : "Guardar solicitud de cotización"}</button>
+      <h4>Cotizaciones de los 2 proveedores externos</h4>
+      <p class="hint" style="margin-top:0">Ferretería local o cadena. Anota el precio unitario neto de cada producto y adjunta su PDF. La cotización del proveedor del contrato la sube el ITO cuando Hevia responda.</p>
+      <div id="np-ofertas"></div>
+
+      <button class="primario" id="np-guardar">${p ? "Guardar cambios" : "Guardar y enviar al ITO"}</button>
       <p class="error oculto" id="np-error"></p>
     </div>`;
   pintarItemsProceso();
 
+  document.getElementById("np-pdf").addEventListener("change", (e) => { if (e.target.files[0]) leerFormularioProceso(e.target.files[0]); });
   document.getElementById("np-agregar").addEventListener("click", () => {
     const producto = document.getElementById("np-prod").value.trim();
     const cantidad = parseFloat(document.getElementById("np-cant").value);
@@ -2791,10 +2913,10 @@ async function vistaNuevoProceso(id) {
     ["np-prod", "np-cant", "np-um"].forEach(i => document.getElementById(i).value = "");
     pintarItemsProceso();
   });
-  document.getElementById("np-guardar").addEventListener("click", () => guardarProceso(id));
+  document.getElementById("np-guardar").addEventListener("click", guardarProceso);
 }
 
-async function guardarProceso(id) {
+async function guardarProceso() {
   if (!_lock()) return;
   try {
     const errorEl = document.getElementById("np-error");
@@ -2808,17 +2930,42 @@ async function guardarProceso(id) {
     if (!val("np-resp")) { mostrar("Indica el responsable del requerimiento."); return; }
     if (!val("np-ubic")) { mostrar("Indica la ubicación de uso de los materiales."); return; }
     if (!procesoItems.length) { mostrar("Agrega al menos un producto."); return; }
+    for (const slot of [2, 3]) {
+      const o = procesoExt[slot];
+      const hayAlgo = o.proveedor.trim() || o.numero.trim() || o.fecha || o.file || o.archivo_url || o.precios.some(v => parseFloat(v) > 0);
+      if (hayAlgo && !o.proveedor.trim()) { mostrar(`Indica el proveedor de la ${SLOTS_COTIZACION[slot - 1].titulo.toLowerCase()}.`); return; }
+    }
 
     const datos = {
       unidad_id, unidad_interna, solicitante: val("np-resp"), ubicacion: val("np-ubic"), motivo: val("np-motivo") || null,
       items: procesoItems.map((it, i) => ({ id: "i" + (i + 1), producto: it.producto, cantidad: it.cantidad, unidad: it.unidad })),
     };
-    const res = id
-      ? await sb.from("proceso_cotizacion").update(datos).eq("id", id).select("id").single()
+    const res = procesoIdEnEdicion
+      ? await sb.from("proceso_cotizacion").update(datos).eq("id", procesoIdEnEdicion).select("id").single()
       : await sb.from("proceso_cotizacion").insert(datos).select("id").single();
     if (res.error) { mostrar("No se pudo guardar: " + res.error.message); return; }
+    procesoIdEnEdicion = res.data.id;
+
+    for (const slot of [2, 3]) {
+      const o = procesoExt[slot];
+      const hayAlgo = o.proveedor.trim() || o.numero.trim() || o.fecha || o.file || o.archivo_url || o.precios.some(v => parseFloat(v) > 0);
+      if (!hayAlgo) continue;
+      let archivo_url = o.archivo_url;
+      if (o.file) {
+        const r = await subirArchivo("memos", o.file);
+        if (r.error) { mostrar(r.error + " La solicitud ya quedó guardada: vuelve a pulsar Guardar."); return; }
+        archivo_url = r.url; o.archivo_url = r.url; o.file = null;
+      }
+      const precios = {};
+      procesoItems.forEach((_, i) => { const v = parseFloat(o.precios[i]); if (v > 0) precios["i" + (i + 1)] = v; });
+      const { error } = await sb.from("proceso_cotizacion_oferta").upsert({
+        proceso_id: procesoIdEnEdicion, slot, proveedor: o.proveedor.trim(), numero: o.numero.trim() || null,
+        fecha: o.fecha || null, precios, archivo_url,
+      }, { onConflict: "proceso_id,slot" });
+      if (error) { mostrar("La solicitud quedó guardada, pero falló una cotización: " + error.message); return; }
+    }
     actualizarNotificaciones();
-    vistaProceso(res.data.id);
+    vistaProceso(procesoIdEnEdicion);
   } finally { _unlock(); }
 }
 
@@ -2841,6 +2988,7 @@ async function vistaProceso(id) {
   (ofertas || []).forEach(o => { por[o.slot] = o; });
   const completas = SLOTS_COTIZACION.filter(s => totalOferta(items, por[s.slot])).length;
   const editable = p.estado === "emitida";
+  const externasCompletas = [2, 3].every(s => totalOferta(items, por[s]));
 
   const tarjetaOferta = (s) => {
     const o = por[s.slot];
@@ -2885,16 +3033,18 @@ async function vistaProceso(id) {
 
       ${p.estado === "borrador" ? `
         <div class="acciones">
-          <button class="secundario" onclick="vistaNuevoProceso('${p.id}')">Editar productos</button>
+          <button class="secundario" onclick="vistaNuevoProceso('${p.id}')">Editar productos y cotizaciones</button>
         </div>
         ${esITO ? `
           <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
             <h4 style="margin-top:0">Emitir (PDF con tu firma)</h4>
-            <p class="hint">Al emitir queda registrada la fecha de envío y los productos ya no se pueden cambiar. Indica a qué proveedor va este PDF; después puedes descargar copias para los demás.</p>
-            <label>Proveedor</label>
-            <input id="pc-prov" value="${esc(proveedorContrato)}" autocomplete="off">
-            <button class="primario" onclick="emitirProceso('${p.id}')">Emitir y descargar PDF</button>
-          </div>` : `<p class="hint">Queda pendiente de que el ITO la emita (PDF con su firma).</p>`}` : `
+            ${externasCompletas ? `
+              <p class="hint">Genera el PDF de cotización con los productos, cantidades y unidades, firmado por ti, para pedir la cotización al proveedor del contrato. Al emitir queda registrada la <strong>fecha de envío</strong> y los productos ya no se pueden cambiar.</p>
+              <label>Proveedor</label>
+              <input id="pc-prov" value="${esc(proveedorContrato)}" autocomplete="off">
+              <button class="primario" onclick="emitirProceso('${p.id}')">Emitir y descargar PDF</button>`
+              : `<p class="hint" style="color:var(--warn)">Para emitir faltan las 2 cotizaciones externas completas (proveedor y precio de todos los productos). Las sube quien hizo la solicitud; puedes corregirlas con "Editar productos y cotizaciones".</p>`}
+          </div>` : `<p class="hint">${externasCompletas ? "Enviada al ITO. Él pedirá la cotización a Hevia con el PDF firmado y subirá su respuesta." : "Faltan las 2 cotizaciones externas completas para que el ITO pueda emitirla: edítala y anótalas."}</p>`}` : `
         <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
           <h4 style="margin-top:0">PDF para enviar a un proveedor</h4>
           <p class="hint">El mismo formato para los 3 proveedores: cambia solo el nombre.</p>
@@ -2903,6 +3053,13 @@ async function vistaProceso(id) {
           <button class="secundario" onclick="descargarCopiaProceso()">Descargar PDF</button>
         </div>`}
     </div>
+
+    ${p.estado === "borrador" ? `
+      <div class="card">
+        <h4 style="margin-top:0">Cotizaciones externas recibidas (${[2, 3].filter(s => totalOferta(items, por[s])).length} de 2 completas)</h4>
+        ${(ofertas || []).length ? comparativoHTML(p, ofertas) : `<p class="hint">Aún no hay cotizaciones externas registradas.</p>`}
+        <p class="hint">${(ofertas || []).filter(o => o.archivo_url).map(o => `<a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">Cotización ${esc(o.proveedor)}</a>`).join(" · ")}</p>
+      </div>` : ""}
 
     ${p.estado !== "borrador" ? `
       <h4 style="margin:1.2rem 0 .2rem">Cotizaciones recibidas (${completas} de 3 completas)</h4>
