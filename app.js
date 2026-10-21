@@ -186,6 +186,8 @@ async function actualizarNotificaciones() {
       const { count: porRevisar } = await sb.from("solicitud").select("id", { count: "exact", head: true })
         .eq("estado", "pendiente").eq("tipo", "operaciones");
       if (porRevisar) partes.push({ n: porRevisar, texto: `${porRevisar} solicitud${porRevisar === 1 ? "" : "es"} de Obras por revisar`, ir: "solicitudes" });
+      const { count: porEmitir } = await sb.from("proceso_cotizacion").select("id", { count: "exact", head: true }).eq("estado", "borrador");
+      if (porEmitir) partes.push({ n: porEmitir, texto: `${porEmitir} solicitud${porEmitir === 1 ? "" : "es"} de cotización por emitir`, ir: "procesos" });
     }
     if (["admin", "admin_ito"].includes(rol)) {
       const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "aprobada");
@@ -392,6 +394,7 @@ const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
   { id: "nueva-operaciones", label: "Solicitud Obras", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaNuevaSolicitudOperaciones },
+  { id: "procesos", label: "Cotización Obras", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaProcesosCotizacion },
   { id: "cotizar", label: "Solicitar cotización", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaCotizacionProveedor },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
@@ -1290,9 +1293,12 @@ function descargarCotizacionPDF(d) {
 // ---------------------------------------------------------------------
 // Solicitudes (listar + aprobar/rechazar si puedes operar: admin_ito o admin)
 // ---------------------------------------------------------------------
-function pillTipoSolicitud(tipo) {
+function pillTipoSolicitud(tipo, s) {
   if (tipo === "especial") return `<span class="pill enviada">especial</span> `;
-  if (tipo === "operaciones") return `<span class="pill enviada">Obras</span> `;
+  if (tipo === "operaciones") {
+    return `<span class="pill enviada">Obras</span> ` +
+      (s && s.proceso_cotizacion_id ? `<span class="pill comprada">fuera de catálogo</span> ` : "");
+  }
   return "";
 }
 
@@ -1326,7 +1332,7 @@ async function vistaSolicitudes() {
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}${s.obra ? " · " + esc(s.obra.nombre) : ""}${s.solicitante ? `<div class="hint">${esc(s.solicitante)}</div>` : ""}</td>
             <td>
-              ${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
+              ${pillTipoSolicitud(s.tipo, s)}${esc(s.motivo)}${s.memo_url ? ` · <a href="${esc(s.memo_url)}" target="_blank" rel="noopener">documento</a>` : ""}
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             ${verMonto ? `<td class="num">${celdaMonto(s)}</td>` : ""}
@@ -1416,7 +1422,7 @@ async function vistaExpedientes(filtroUnidad) {
             <td class="num">${esc(numSol(s)) || "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
             <td>${esc(s.unidad?.nombre)}</td>
-            <td>${pillTipoSolicitud(s.tipo)}${esc(s.motivo)}</td>
+            <td>${pillTipoSolicitud(s.tipo, s)}${esc(s.motivo)}</td>
             <td><span class="pill ${s.estado}">${s.estado}</span></td>
             <td class="num">${g.length || "—"}</td>
             <td>${f.length ? '<span class="pill facturada">sí</span>' : "—"}</td>
@@ -1467,6 +1473,16 @@ async function vistaExpediente(id) {
   ]);
   if (error || !s) { vista().innerHTML = `<div class="card error">No se pudo abrir el expediente: ${error ? error.message : "no existe"}</div>`; return; }
   const especial = s.tipo === "especial";
+
+  // Si la solicitud nació de una Cotización Obras, trae las 3 cotizaciones que la respaldan.
+  let procExp = null, ofertasExp = [];
+  if (s.proceso_cotizacion_id) {
+    const [{ data: pp }, { data: oo }] = await Promise.all([
+      sb.from("proceso_cotizacion").select("*, unidad(nombre)").eq("id", s.proceso_cotizacion_id).single(),
+      sb.from("proceso_cotizacion_oferta").select("*").eq("proceso_id", s.proceso_cotizacion_id),
+    ]);
+    procExp = pp; ofertasExp = oo || [];
+  }
 
   window._expActual = { s, detalle: detalle || [] };
   const opero = puedeOperar();
@@ -1571,6 +1587,14 @@ async function vistaExpediente(id) {
       </div>
       ${aprobada ? "" : `<p class="hint">La hoja se habilita cuando el Director de Obras aprueba la solicitud.</p>`}
     </div>
+
+    ${procExp ? `
+      <div class="card">
+        <div class="exp-seccion"><h4>Cotizaciones que respaldan la compra</h4>
+          <span class="hint">${esc(procExp.correlativo)} · enviada el ${fechaCL(procExp.fecha_envio)}</span></div>
+        ${comparativoHTML(procExp, ofertasExp)}
+        <p class="hint">${ofertasExp.filter(o => o.archivo_url).map(o => `<a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">Cotización ${esc(o.proveedor)}</a>`).join(" · ") || "Sin archivos adjuntos."}</p>
+      </div>` : ""}
 
     ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : ""}
 
@@ -2584,6 +2608,479 @@ function comprimirFirma(file, anchoMax = 900) {
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("El archivo no es una imagen válida.")); };
     img.src = url;
   });
+}
+
+// ---------------------------------------------------------------------
+// COTIZACIÓN OBRAS — solo Dirección de Obras (las demás direcciones siguen igual).
+//   1. Obras (o el ITO) prepara la solicitud de cotización: productos con cantidad y unidad.
+//   2. El ITO la emite: PDF con su firma y fecha de envío.
+//   3. Se registran a mano las 3 cotizaciones (proveedor del contrato + 2 externas)
+//      con el precio de cada producto.
+//   4. Con las 3 se crea la solicitud especial, que sigue el recorrido de una
+//      solicitud de Obras (V°B° del ITO, Director, hoja, guías y factura).
+// ---------------------------------------------------------------------
+const LUGAR_ENTREGA = "Avenida Estación 344, Doñihue";
+const PROVEEDOR_CONTRATO = "Importadora Hevia SpA";
+const SLOTS_COTIZACION = [
+  { slot: 1, titulo: "Proveedor del contrato" },
+  { slot: 2, titulo: "Cotización externa 1" },
+  { slot: 3, titulo: "Cotización externa 2" },
+];
+const ESTADO_PROCESO = {
+  borrador: { texto: "por emitir", clase: "pendiente" },
+  emitida: { texto: "cotizando", clase: "emitida" },
+  solicitud_creada: { texto: "solicitud creada", clase: "aprobada" },
+};
+const pillProceso = (e) => { const x = ESTADO_PROCESO[e] || { texto: e, clase: "" }; return `<span class="pill ${x.clase}">${x.texto}</span>`; };
+const fechaCL = (iso) => { const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : (iso || ""); };
+
+// Total de una cotización; null si le falta el precio de algún producto.
+function totalOferta(items, oferta) {
+  if (!oferta) return null;
+  let neto = 0;
+  for (const it of items) {
+    const p = Number((oferta.precios || {})[it.id]);
+    if (!(p > 0)) return null;
+    neto += p * Number(it.cantidad || 0);
+  }
+  const iva = Math.round(neto * 0.19);
+  return { neto, iva, bruto: neto + iva };
+}
+
+// Cuadro comparativo producto por producto de las cotizaciones registradas.
+function comparativoHTML(proceso, ofertas) {
+  const items = proceso.items || [];
+  const por = {};
+  (ofertas || []).forEach(o => { por[o.slot] = o; });
+  const cols = SLOTS_COTIZACION.map(s => ({ ...s, o: por[s.slot], t: totalOferta(items, por[s.slot]) }));
+  const completas = cols.filter(c => c.t);
+  const minNeto = completas.length > 1 ? Math.min(...completas.map(c => c.t.neto)) : null;
+  const marca = (c) => (c.t && minNeto != null && c.t.neto === minNeto) ? ' style="background:var(--ok-tint)"' : "";
+
+  let concl = "";
+  const hevia = cols[0], ext = cols.slice(1).filter(c => c.t);
+  if (hevia.t && ext.length) {
+    const mejor = Math.min(...ext.map(c => c.t.neto));
+    const dif = (hevia.t.neto - mejor) / mejor * 100;
+    const txt = Math.abs(dif) < 0.05 ? "igual que" : (dif < 0 ? `${Math.abs(dif).toFixed(1)}% más barato que` : `${dif.toFixed(1)}% más caro que`);
+    concl += `<p><strong>${esc(hevia.o.proveedor)}</strong> (contrato) está ${txt} la mejor cotización externa.</p>`;
+  }
+  if (completas.length === 3) {
+    const g = completas.reduce((a, b) => (b.t.neto < a.t.neto ? b : a));
+    concl += `<p>Cotización más conveniente: <strong>${esc(g.o.proveedor)}</strong> (${money(g.t.neto)} neto).</p>`;
+  }
+  return `<div style="overflow-x:auto"><table>
+    <tr><th>Producto</th><th class="num">Cant.</th><th>Unidad</th>${cols.map(c => `<th class="num">${c.titulo}<div class="hint">${c.o ? esc(c.o.proveedor) : "sin registrar"}</div></th>`).join("")}</tr>
+    ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>${cols.map(c => { const p = c.o ? Number((c.o.precios || {})[it.id]) : 0; return `<td class="num">${p > 0 ? money(p) : "—"}</td>`; }).join("")}</tr>`).join("")}
+    <tr><td colspan="3" style="text-align:right">Total neto</td>${cols.map(c => `<td class="num"${marca(c)}>${c.t ? money(c.t.neto) : (c.o ? "incompleta" : "—")}</td>`).join("")}</tr>
+    <tr><td colspan="3" style="text-align:right">IVA 19%</td>${cols.map(c => `<td class="num">${c.t ? money(c.t.iva) : "—"}</td>`).join("")}</tr>
+    <tr><td colspan="3" style="text-align:right;font-weight:700">Total con IVA</td>${cols.map(c => `<td class="num" style="font-weight:700">${c.t ? money(c.t.bruto) : "—"}</td>`).join("")}</tr>
+  </table></div>${concl}`;
+}
+
+// ---------- Listado ----------
+async function vistaProcesosCotizacion() {
+  vista().innerHTML = "<div class='card'>Cargando…</div>";
+  const { data, error } = await sb.from("proceso_cotizacion")
+    .select("*, unidad(nombre), proceso_cotizacion_oferta(slot)")
+    .order("creado_en", { ascending: false });
+  if (error) {
+    vista().innerHTML = `<div class="card error">${esc(error.message)}<br><small>Falta correr <code>Documentacion/cotizaciones-obras.sql</code> en Supabase.</small></div>`;
+    return;
+  }
+  vista().innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+        <h3 style="margin:0">Cotización Obras</h3>
+        <button class="primario" style="margin-top:0" onclick="vistaNuevoProceso()">+ Nueva solicitud de cotización</button>
+      </div>
+      <p class="hint">Para productos que no están en el catálogo del contrato: se piden 3 cotizaciones (proveedor del contrato y 2 externas) y con ellas se crea la solicitud especial.</p>
+      <table>
+        <tr><th>N°</th><th>Envío</th><th>Unidad</th><th class="num">Productos</th><th class="num">Cotizaciones</th><th>Estado</th><th></th></tr>
+        ${(data || []).map(p => `<tr>
+          <td class="num">${esc(p.correlativo) || "—"}</td>
+          <td>${p.fecha_envio ? fechaCL(p.fecha_envio) : "—"}</td>
+          <td>${esc(p.unidad?.nombre)}${p.unidad_interna ? `<div class="hint">${esc(p.unidad_interna)}</div>` : ""}<div class="hint">${esc(p.solicitante)}</div></td>
+          <td class="num">${(p.items || []).length}</td>
+          <td class="num">${(p.proceso_cotizacion_oferta || []).length} de 3</td>
+          <td>${pillProceso(p.estado)}</td>
+          <td><button class="secundario" onclick="vistaProceso('${p.id}')">Abrir</button></td>
+        </tr>`).join("") || `<tr><td colspan="7" class="hint">Aún no hay solicitudes de cotización.</td></tr>`}
+      </table>
+    </div>`;
+}
+
+// ---------- Crear / editar el borrador ----------
+let procesoItems = [];
+
+function pintarItemsProceso() {
+  const cont = document.getElementById("np-items");
+  if (!cont) return;
+  if (!procesoItems.length) { cont.innerHTML = "<p style='color:var(--ink-soft);font-size:0.85rem'>Aún no agregas productos.</p>"; return; }
+  cont.innerHTML = `<table>
+    <tr><th>Producto</th><th class="num">Cantidad</th><th>Unidad</th><th></th></tr>
+    ${procesoItems.map((it, i) => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
+      <td><button class="secundario" onclick="procesoItems.splice(${i},1);pintarItemsProceso()">Quitar</button></td></tr>`).join("")}
+  </table>`;
+}
+
+async function vistaNuevoProceso(id) {
+  procesoItems = [];
+  let p = null;
+  if (id) {
+    const { data, error } = await sb.from("proceso_cotizacion").select("*").eq("id", id).single();
+    if (error || !data) { vista().innerHTML = `<div class="card error">No se pudo abrir la cotización${error ? ": " + esc(error.message) : ""}</div>`; return; }
+    if (data.estado !== "borrador") { vistaProceso(id); return; }
+    p = data;
+    procesoItems = (p.items || []).map(it => ({ producto: it.producto, cantidad: it.cantidad, unidad: it.unidad }));
+  }
+  const { data: todas } = await sb.from("unidad").select("id, nombre").order("nombre");
+  const soloObras = rolEfectivo() === "solicitante_obras";
+  const unidades = soloObras ? (todas || []).filter(u => u.id === perfilActual.unidad_id) : (todas || []);
+  const unidadSel = p ? p.unidad_id : perfilActual.unidad_id;
+
+  vista().innerHTML = `
+    <button class="exp-volver" onclick="vistaProcesosCotizacion()">← Volver a Cotización Obras</button>
+    <div class="card">
+      <h3 style="margin-top:0">${p ? "Editar" : "Nueva"} solicitud de cotización${p ? " " + esc(p.correlativo) : ""}</h3>
+      <p class="hint">Escribe los productos que necesitas y no están en el catálogo. Luego el ITO la emite (PDF firmado) y tú pides las cotizaciones a los proveedores.</p>
+      ${soloObras && !unidades.length ? `<p class="error">Tu perfil no tiene una dirección asignada. Pide al administrador que te la asigne en Usuarios.</p>` : ""}
+
+      <label>Dirección responsable</label>
+      <select id="np-unidad" ${soloObras ? "disabled" : ""}>
+        ${soloObras ? "" : `<option value="">— selecciona —</option>`}
+        ${unidades.map(u => `<option value="${u.id}" ${u.id === unidadSel ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+      </select>
+      <label>Unidad</label>
+      <select id="np-interna">
+        <option value="">— selecciona —</option>
+        ${["Operaciones", "Aseo y Ornato", "Edificios"].map(n => `<option value="${n}" ${p && p.unidad_interna === n ? "selected" : ""}>${n}</option>`).join("")}
+      </select>
+      <label>Responsable del requerimiento</label>
+      <input id="np-resp" value="${esc(p ? p.solicitante : "")}" placeholder="Nombre y cargo">
+      <label>Ubicación de uso de los materiales</label>
+      <textarea id="np-ubic" rows="2" placeholder="Calle, número, sector">${esc(p ? p.ubicacion : "")}</textarea>
+      <label>Motivo / para qué se necesitan</label>
+      <textarea id="np-motivo" rows="2" placeholder="Motivo breve">${esc(p ? p.motivo : "")}</textarea>
+      <label>Lugar de entrega</label>
+      <input value="${esc(LUGAR_ENTREGA)}" disabled>
+
+      <h4>Productos a cotizar</h4>
+      <div id="np-items"></div>
+      <div class="linea-detalle" style="grid-template-columns:3fr 1fr 1fr auto">
+        <div><label>Producto (con sus especificaciones)</label><input id="np-prod" placeholder="Ej: Manguera reforzada 3/4&quot; rollo 50 m" autocomplete="off"></div>
+        <div><label>Cantidad</label><input id="np-cant" type="number" min="0" step="0.01"></div>
+        <div><label>Unidad de medida</label><input id="np-um" placeholder="un, m, kg, rollo…" autocomplete="off"></div>
+        <div><button class="secundario" id="np-agregar" style="margin-top:0">+ Agregar</button></div>
+      </div>
+      <p class="error oculto" id="np-msg"></p>
+
+      <button class="primario" id="np-guardar">${p ? "Guardar cambios" : "Guardar solicitud de cotización"}</button>
+      <p class="error oculto" id="np-error"></p>
+    </div>`;
+  pintarItemsProceso();
+
+  document.getElementById("np-agregar").addEventListener("click", () => {
+    const producto = document.getElementById("np-prod").value.trim();
+    const cantidad = parseFloat(document.getElementById("np-cant").value);
+    const unidad = document.getElementById("np-um").value.trim();
+    const msg = document.getElementById("np-msg");
+    msg.classList.add("oculto");
+    if (!producto || !(cantidad > 0) || !unidad) { msg.textContent = "Completa producto, cantidad y unidad de medida."; msg.classList.remove("oculto"); return; }
+    procesoItems.push({ producto, cantidad, unidad });
+    ["np-prod", "np-cant", "np-um"].forEach(i => document.getElementById(i).value = "");
+    pintarItemsProceso();
+  });
+  document.getElementById("np-guardar").addEventListener("click", () => guardarProceso(id));
+}
+
+async function guardarProceso(id) {
+  if (!_lock()) return;
+  try {
+    const errorEl = document.getElementById("np-error");
+    const mostrar = (m) => { errorEl.textContent = m; errorEl.classList.remove("oculto"); };
+    errorEl.classList.add("oculto");
+    const val = (i) => document.getElementById(i).value.trim();
+    const unidad_id = document.getElementById("np-unidad").value || perfilActual.unidad_id || null;
+    const unidad_interna = document.getElementById("np-interna").value;
+    if (!unidad_id) { mostrar("Selecciona la dirección responsable."); return; }
+    if (!unidad_interna) { mostrar("Selecciona la unidad (Operaciones, Aseo y Ornato o Edificios)."); return; }
+    if (!val("np-resp")) { mostrar("Indica el responsable del requerimiento."); return; }
+    if (!val("np-ubic")) { mostrar("Indica la ubicación de uso de los materiales."); return; }
+    if (!procesoItems.length) { mostrar("Agrega al menos un producto."); return; }
+
+    const datos = {
+      unidad_id, unidad_interna, solicitante: val("np-resp"), ubicacion: val("np-ubic"), motivo: val("np-motivo") || null,
+      items: procesoItems.map((it, i) => ({ id: "i" + (i + 1), producto: it.producto, cantidad: it.cantidad, unidad: it.unidad })),
+    };
+    const res = id
+      ? await sb.from("proceso_cotizacion").update(datos).eq("id", id).select("id").single()
+      : await sb.from("proceso_cotizacion").insert(datos).select("id").single();
+    if (res.error) { mostrar("No se pudo guardar: " + res.error.message); return; }
+    actualizarNotificaciones();
+    vistaProceso(res.data.id);
+  } finally { _unlock(); }
+}
+
+// ---------- Detalle: emitir, registrar las 3 cotizaciones, comparar, crear la solicitud ----------
+async function vistaProceso(id) {
+  vista().innerHTML = "<div class='card'>Cargando…</div>";
+  const [{ data: p, error }, { data: ofertas }, { data: sols }, { data: conv }] = await Promise.all([
+    sb.from("proceso_cotizacion").select("*, unidad(nombre)").eq("id", id).single(),
+    sb.from("proceso_cotizacion_oferta").select("*").eq("proceso_id", id),
+    sb.from("solicitud").select("id, correlativo, n_solicitud, estado").eq("proceso_cotizacion_id", id),
+    sb.from("contrato").select("proveedor").eq("estado", "vigente").order("creado_en", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  if (error || !p) { vista().innerHTML = `<div class="card error">No se pudo abrir la cotización${error ? ": " + esc(error.message) : ""}</div>`; return; }
+  window._procActual = { p, ofertas: ofertas || [] };
+
+  const esITO = puedeOperar();
+  const proveedorContrato = (conv && conv.proveedor) || PROVEEDOR_CONTRATO;
+  const items = p.items || [];
+  const por = {};
+  (ofertas || []).forEach(o => { por[o.slot] = o; });
+  const completas = SLOTS_COTIZACION.filter(s => totalOferta(items, por[s.slot])).length;
+  const editable = p.estado === "emitida";
+
+  const tarjetaOferta = (s) => {
+    const o = por[s.slot];
+    const t = totalOferta(items, o);
+    return `<div class="card" id="oferta-${s.slot}" data-archivo="${esc(o ? o.archivo_url || "" : "")}" style="margin-top:.8rem">
+      <div class="exp-seccion"><h4>${s.titulo}</h4>${t ? `<span class="pill aprobada">completa · ${money(t.neto)} neto</span>` : (o ? `<span class="pill pendiente">incompleta</span>` : `<span class="hint">sin registrar</span>`)}</div>
+      <div class="linea-detalle" style="grid-template-columns:2fr 1fr 1fr">
+        <div><label>Proveedor</label><input class="of-prov" value="${esc(o ? o.proveedor : (s.slot === 1 ? proveedorContrato : ""))}" ${editable ? "" : "disabled"} placeholder="Nombre del proveedor"></div>
+        <div><label>N° de cotización</label><input class="of-num" value="${esc(o ? o.numero : "")}" ${editable ? "" : "disabled"}></div>
+        <div><label>Fecha</label><input class="of-fecha" type="date" value="${o && o.fecha ? o.fecha : ""}" ${editable ? "" : "disabled"}></div>
+      </div>
+      <table>
+        <tr><th>Producto</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Precio unitario neto</th></tr>
+        ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
+          <td class="num"><input class="of-precio" data-item="${it.id}" type="number" min="0" step="1" value="${o && (o.precios || {})[it.id] ? o.precios[it.id] : ""}" ${editable ? "" : "disabled"} style="width:7rem;text-align:right"></td></tr>`).join("")}
+      </table>
+      <label>PDF de la cotización ${o && o.archivo_url ? `· <a href="${esc(o.archivo_url)}" target="_blank" rel="noopener">ver adjunto actual</a>` : `<span class="hint">(recomendado: queda como respaldo)</span>`}</label>
+      ${editable ? `<input class="of-file" type="file" accept=".pdf,.doc,.docx,image/*">
+        <button class="primario" onclick="guardarOferta('${p.id}', ${s.slot})">Guardar esta cotización</button>
+        <p class="error oculto of-error"></p>` : ""}
+    </div>`;
+  };
+
+  vista().innerHTML = `
+    <button class="exp-volver" onclick="vistaProcesosCotizacion()">← Volver a Cotización Obras</button>
+    <div class="card">
+      <div class="exp-cabecera">
+        <div><h3 style="margin:0">Solicitud de cotización ${esc(p.correlativo) || ""}</h3>
+          <div class="hint">${esc(p.unidad?.nombre)}${p.unidad_interna ? " · " + esc(p.unidad_interna) : ""} · ${esc(p.solicitante)}</div></div>
+        <div>${pillProceso(p.estado)}</div>
+      </div>
+      <div class="exp-datos">
+        <div><div class="d-k">Fecha de envío</div>${p.fecha_envio ? fechaCL(p.fecha_envio) : "— (la pone el sistema al emitir)"}</div>
+        <div><div class="d-k">Lugar de entrega</div>${esc(p.lugar_entrega)}</div>
+        <div><div class="d-k">Ubicación de uso</div>${esc(p.ubicacion) || "—"}</div>
+        <div><div class="d-k">Motivo</div>${esc(p.motivo) || "—"}</div>
+      </div>
+      <table style="margin-top:1rem">
+        <tr><th>Producto</th><th class="num">Cantidad</th><th>Unidad</th></tr>
+        ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td></tr>`).join("")}
+      </table>
+
+      ${p.estado === "borrador" ? `
+        <div class="acciones">
+          <button class="secundario" onclick="vistaNuevoProceso('${p.id}')">Editar productos</button>
+        </div>
+        ${esITO ? `
+          <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
+            <h4 style="margin-top:0">Emitir (PDF con tu firma)</h4>
+            <p class="hint">Al emitir queda registrada la fecha de envío y los productos ya no se pueden cambiar. Indica a qué proveedor va este PDF; después puedes descargar copias para los demás.</p>
+            <label>Proveedor</label>
+            <input id="pc-prov" value="${esc(proveedorContrato)}" autocomplete="off">
+            <button class="primario" onclick="emitirProceso('${p.id}')">Emitir y descargar PDF</button>
+          </div>` : `<p class="hint">Queda pendiente de que el ITO la emita (PDF con su firma).</p>`}` : `
+        <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
+          <h4 style="margin-top:0">PDF para enviar a un proveedor</h4>
+          <p class="hint">El mismo formato para los 3 proveedores: cambia solo el nombre.</p>
+          <label>Proveedor</label>
+          <input id="pc-prov" value="${esc(proveedorContrato)}" autocomplete="off">
+          <button class="secundario" onclick="descargarCopiaProceso()">Descargar PDF</button>
+        </div>`}
+    </div>
+
+    ${p.estado !== "borrador" ? `
+      <h4 style="margin:1.2rem 0 .2rem">Cotizaciones recibidas (${completas} de 3 completas)</h4>
+      ${SLOTS_COTIZACION.map(tarjetaOferta).join("")}
+
+      <div class="card">
+        <h4 style="margin-top:0">Comparación</h4>
+        ${(ofertas || []).length ? comparativoHTML(p, ofertas) : `<p class="hint">Registra las cotizaciones para compararlas.</p>`}
+      </div>
+
+      <div class="card">
+        ${p.estado === "solicitud_creada" ? `
+          <h4 style="margin-top:0">Solicitud especial creada</h4>
+          ${(sols || []).length ? `<p>Solicitud <strong>${esc(numSol(sols[0]))}</strong> · <span class="pill ${sols[0].estado}">${sols[0].estado}</span>
+            <button class="secundario" onclick="abrirExpediente('${sols[0].id}')">Ver expediente</button></p>` : `<p class="hint">Ya se creó la solicitud.</p>`}` : `
+          <h4 style="margin-top:0">Crear la solicitud especial</h4>
+          ${completas === 3
+            ? `<p class="hint">Ya están las 3 cotizaciones. Se crea una solicitud de Obras con estos productos y los precios del proveedor del contrato; sigue el recorrido normal y se descuenta del convenio al facturar.</p>
+               <button class="primario" onclick="crearSolicitudDesdeProceso('${p.id}')">Crear solicitud especial</button>`
+            : `<p class="hint">Faltan ${3 - completas} cotización(es) completa(s) para poder crear la solicitud. Cada una necesita proveedor y el precio de todos los productos.</p>`}
+          <p class="error oculto" id="pc-error"></p>`}
+      </div>` : ""}`;
+}
+
+async function emitirProceso(id) {
+  if (!_lock()) return;
+  try {
+    const prov = (document.getElementById("pc-prov").value || "").trim();
+    if (!prov) { alert("Indica el proveedor al que se envía este PDF."); return; }
+    const { data, error } = await sb.from("proceso_cotizacion").update({ estado: "emitida" }).eq("id", id).select("*, unidad(nombre)").single();
+    if (error) { alert("No se pudo emitir: " + error.message); return; }
+    await descargarPdfCotizacion(data, prov);
+    actualizarNotificaciones();
+    vistaProceso(id);
+  } finally { _unlock(); }
+}
+
+async function descargarCopiaProceso() {
+  const prov = (document.getElementById("pc-prov").value || "").trim();
+  if (!prov) { alert("Indica el proveedor al que se envía este PDF."); return; }
+  await descargarPdfCotizacion(window._procActual.p, prov);
+}
+
+// Formato único de solicitud de cotización (firma solo del ITO).
+async function descargarPdfCotizacion(p, proveedor) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert("No se pudo cargar el generador de PDF. Revisa la conexión."); return; }
+  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
+  const M = 18, R = 210 - M;
+  let y = M;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+  doc.text("MUNICIPALIDAD DE DOÑIHUE", M, y);
+  doc.setFontSize(10); doc.setFont("helvetica", "normal");
+  y += 6; doc.text("Dirección de Obras — Unidad de Operaciones", M, y);
+  y += 10; doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+  doc.text(`SOLICITUD DE COTIZACIÓN${p.correlativo ? "  N° " + p.correlativo : ""}`, M, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+
+  y += 9;
+  const fila = (k, v) => { doc.setFont("helvetica", "bold"); doc.text(k, M, y); doc.setFont("helvetica", "normal"); const l = doc.splitTextToSize(String(v || "—"), 125); doc.text(l, M + 48, y); y += 6 + (l.length - 1) * 4.5; };
+  fila("Señores:", proveedor);
+  fila("Fecha de envío:", fechaCL(p.fecha_envio) || fechaCL(hoyISO()));
+  fila("Dirección solicitante:", p.unidad?.nombre || "");
+  if (p.unidad_interna) fila("Unidad:", p.unidad_interna);
+  fila("Responsable:", p.solicitante);
+  fila("Lugar de entrega:", p.lugar_entrega || LUGAR_ENTREGA);
+  if (p.ubicacion) fila("Ubicación de uso:", p.ubicacion);
+
+  y += 3;
+  const intro = doc.splitTextToSize("Se solicita cotizar los productos que se detallan, indicando el precio unitario neto de cada uno, el plazo de entrega y la validez de la oferta.", R - M);
+  doc.text(intro, M, y); y += intro.length * 4.6 + 4;
+
+  if (y > 250) { doc.addPage(); y = M; }
+  doc.setFont("helvetica", "bold");
+  doc.text("PRODUCTOS A COTIZAR", M, y); y += 3;
+  doc.setDrawColor(180); doc.line(M, y, R, y); y += 6;
+  doc.text("N°", M, y); doc.text("Producto", M + 9, y); doc.text("Cantidad", 150, y, { align: "right" }); doc.text("Unidad", 156, y);
+  doc.setFont("helvetica", "normal");
+  y += 2; doc.line(M, y, R, y); y += 6;
+  (p.items || []).forEach((it, i) => {
+    const l = doc.splitTextToSize(String(it.producto || ""), 105);
+    const alto = Math.max(7, l.length * 4.6 + 2.4);
+    if (y + alto > 255) { doc.addPage(); y = M; }
+    doc.text(String(i + 1), M, y); doc.text(l, M + 9, y);
+    doc.text(String(it.cantidad ?? ""), 150, y, { align: "right" });
+    doc.text(String(it.unidad || ""), 156, y);
+    y += alto;
+  });
+
+  // Firma del ITO (PNG del bucket privado "firmas"); si falta, queda la línea en blanco.
+  const firma = await cargarFirma("ito.png");
+  const altoFirma = 32, anchoBloque = 70;
+  if (y > 225) { doc.addPage(); y = M; }
+  const yLinea = y + altoFirma + 14;
+  if (firma) {
+    const k = Math.min((anchoBloque - 4) / firma.w, altoFirma / firma.h);
+    const w = firma.w * k, h = firma.h * k;
+    doc.addImage(firma.dataUrl, firma.formato, M + (anchoBloque - w) / 2, yLinea - h - 1, w, h);
+  }
+  doc.setDrawColor(120); doc.line(M, yLinea, M + anchoBloque, yLinea);
+  doc.text("Encargado de Operaciones (ITO)", M + anchoBloque / 2, yLinea + 5, { align: "center" });
+
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text("Documento generado por Control Ferretería — Municipalidad de Doñihue", M, 288);
+  doc.save(`cotizacion-${p.correlativo || p.id.slice(0, 8)}.pdf`);
+}
+
+async function guardarOferta(procesoId, slot) {
+  if (!_lock()) return;
+  try {
+    const card = document.getElementById("oferta-" + slot);
+    const err = card.querySelector(".of-error");
+    const mostrar = (m) => { err.textContent = m; err.classList.remove("oculto"); };
+    err.classList.add("oculto");
+    const proveedor = card.querySelector(".of-prov").value.trim();
+    if (!proveedor) { mostrar("Indica el proveedor."); return; }
+    const precios = {};
+    card.querySelectorAll(".of-precio").forEach(inp => { const v = parseFloat(inp.value); if (v > 0) precios[inp.dataset.item] = v; });
+    let archivo_url = card.dataset.archivo || null;
+    const file = card.querySelector(".of-file").files[0];
+    if (file) {
+      const r = await subirArchivo("memos", file);
+      if (r.error) { mostrar(r.error); return; }
+      archivo_url = r.url;
+    }
+    const { error } = await sb.from("proceso_cotizacion_oferta").upsert({
+      proceso_id: procesoId, slot, proveedor,
+      numero: card.querySelector(".of-num").value.trim() || null,
+      fecha: card.querySelector(".of-fecha").value || null,
+      precios, archivo_url,
+    }, { onConflict: "proceso_id,slot" });
+    if (error) { mostrar("No se pudo guardar: " + error.message); return; }
+    vistaProceso(procesoId);
+  } finally { _unlock(); }
+}
+
+// Con las 3 cotizaciones completas: crea la solicitud especial (recorrido de Obras)
+// con los precios del proveedor del contrato.
+async function crearSolicitudDesdeProceso(id) {
+  if (!_lock()) return;
+  try {
+    const errorEl = document.getElementById("pc-error");
+    const mostrar = (m) => { errorEl.textContent = m; errorEl.classList.remove("oculto"); };
+    errorEl.classList.add("oculto");
+    const { p, ofertas } = window._procActual || {};
+    if (!p || p.id !== id) { mostrar("Vuelve a abrir la cotización."); return; }
+    const items = p.items || [];
+    const por = {};
+    (ofertas || []).forEach(o => { por[o.slot] = o; });
+    if (!SLOTS_COTIZACION.every(s => totalOferta(items, por[s.slot]))) { mostrar("Faltan cotizaciones completas."); return; }
+
+    const porRevisar = rolEfectivo() === "solicitante_obras";
+    const payload = {
+      unidad_id: p.unidad_id, unidad_interna: p.unidad_interna, solicitante: p.solicitante,
+      motivo: p.motivo || `Compra fuera de catálogo según cotización ${p.correlativo}`,
+      ubicacion: p.ubicacion, fecha_solicitud: hoyISO(), tipo: "operaciones", proceso_cotizacion_id: p.id,
+    };
+    if (!porRevisar) {
+      payload.estado = "visada";
+      payload.visado_por = perfilActual.id;
+      payload.visado_en = new Date().toISOString();
+    }
+    const { data: sol, error } = await sb.from("solicitud").insert(payload).select().single();
+    if (error) { mostrar("No se pudo crear la solicitud: " + error.message); return; }
+
+    const hevia = por[1];
+    const detalle = items.map(it => ({
+      solicitud_id: sol.id, articulo_id: null,
+      descripcion_libre: it.producto, unidad_medida_libre: it.unidad,
+      cantidad_solicitada: it.cantidad, precio_unitario_neto: Number(hevia.precios[it.id]),
+    }));
+    const { error: errDet } = await sb.from("solicitud_detalle").insert(detalle);
+    if (errDet) { mostrar("Se creó la solicitud pero fallaron sus productos: " + errDet.message); return; }
+
+    const { error: errEst } = await sb.from("proceso_cotizacion").update({ estado: "solicitud_creada" }).eq("id", id);
+    if (errEst) { mostrar("La solicitud se creó pero no se pudo cerrar la cotización: " + errEst.message); return; }
+    actualizarNotificaciones();
+    vistaProceso(id);
+  } finally { _unlock(); }
 }
 
 // Descarga una firma del bucket privado para estamparla en el PDF; null si no hay.

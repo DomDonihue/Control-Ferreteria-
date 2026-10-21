@@ -69,6 +69,14 @@ Se marca "fuera de catálogo" en el formulario normal. Requiere las justificacio
 3. Agrega los materiales con el buscador y pulsa **Ingresar solicitud**.
 4. Si el ITO la rechaza, verás el **motivo** en Solicitudes.
 
+### Productos que no están en el catálogo — "Cotización Obras" (solo Dirección de Obras)
+Las demás direcciones siguen con el procedimiento anterior.
+1. **Preparar:** el usuario de Obras entra a **Cotización Obras → Nueva solicitud de cotización**, completa la unidad, el responsable, la ubicación de uso y el motivo, y agrega cada producto con su **cantidad y unidad de medida**. El lugar de entrega es siempre Avenida Estación 344, Doñihue. Queda "por emitir" con número CT-AAAA-NNN.
+2. **Emitir (ITO):** el ITO la abre y pulsa **Emitir y descargar PDF**. El proveedor viene por defecto (Importadora Hevia) y se puede cambiar. Queda registrada la **fecha de envío** y los productos ya no se pueden modificar. El PDF lleva la firma del ITO. Para los otros dos proveedores se descarga el mismo formato cambiando solo el nombre.
+3. **Registrar las 3 cotizaciones:** quien las pidió las anota a mano: la del **proveedor del contrato** y **2 externas** (ferretería local o cadena). Para cada una: proveedor, N° y fecha de la cotización, el **precio unitario neto de cada producto** y su PDF adjunto.
+4. **Comparar:** el sistema muestra producto por producto el precio de cada proveedor, el total, cuál es el más conveniente y cuánto se aleja el proveedor del contrato de la mejor cotización externa. Queda como respaldo de que el precio es el más conveniente.
+5. **Crear la solicitud especial:** con las 3 cotizaciones completas aparece **Crear solicitud especial**. Nace una solicitud de Obras con esos productos y los precios del proveedor del contrato; sigue el recorrido normal (V°B° del ITO, aprobación del Director, hoja a la ferretería, guías y factura) y la factura se **descuenta del convenio**. En su expediente quedan las 3 cotizaciones.
+
 ### ITO — revisar y tramitar
 - **Revisar:** en **Solicitudes**, las de Obras en *pendiente* tienen **Ver**, **Dar V°B°** y **Rechazar** (el rechazo pide motivo).
 - **Expedientes → Abrir** una solicitud aprobada:
