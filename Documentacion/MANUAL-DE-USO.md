@@ -89,7 +89,7 @@ Se marca "fuera de catálogo" en el formulario normal. Requiere las justificacio
 
 ### Administrador
 - **Usuarios:** asigna rol y unidad a cada persona.
-- **Convenio / ferretería:** registra el convenio vigente (proveedor, tope).
+- **Convenio / ferretería:** registra el convenio vigente (proveedor, tope). Más abajo están las tarjetas **Firma y timbre del Director** y **Firma del Encargado (ITO)**: elige la imagen (PNG o JPG, fondo blanco o transparente), pulsa **Guardar firma** y se comprime sola; **Eliminar firma** la quita. Ambas se estampan al pie de la hoja de solicitud (la del Director solo si la solicitud ya está aprobada); si falta una, queda su línea en blanco para firmar a mano.
 - **Catálogo:** mantiene el listado de productos.
 
 ## 5. Pantalla Inicio

@@ -2279,7 +2279,7 @@ async function descargarHojaPDF() {
   if (!exp) return;
   if (!window.jspdf || !window.jspdf.jsPDF) { alert("No se pudo cargar el generador de PDF. Revisa la conexión."); return; }
   const { s, detalle } = exp;
-  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
   const M = 18;
   let y = M;
 
@@ -2366,9 +2366,27 @@ async function descargarHojaPDF() {
     doc.setFontSize(10); doc.setTextColor(0);
   }
 
-  y += 12;
-  doc.line(M, y, 90, y); y += 5;
-  doc.text("Encargado de Operaciones (ITO)", M, y);
+  // Firmas (PNG del bucket privado "firmas"). La del Director solo va si la
+  // solicitud ya está aprobada; si falta alguna imagen queda la línea en blanco.
+  const aprobadaPdf = ["aprobada", "enviada", "recibida", "facturada", "cerrada"].includes(s.estado);
+  const [firmaIto, firmaDir] = await Promise.all([cargarFirma("ito.png"), aprobadaPdf ? cargarFirma("director.png") : null]);
+  const altoFirma = 32, anchoBloque = 70;
+  if (y > 225) { doc.addPage(); y = M; }
+  const yLinea = y + altoFirma + 12;
+  const bloques = [
+    { x0: M, firma: firmaIto, texto: "Encargado de Operaciones (ITO)" },
+    { x0: 210 - M - anchoBloque, firma: firmaDir, texto: "Director de Obras Municipales" },
+  ];
+  bloques.forEach(({ x0, firma, texto }) => {
+    if (firma) {
+      const k = Math.min((anchoBloque - 4) / firma.w, altoFirma / firma.h);
+      const w = firma.w * k, h = firma.h * k;
+      doc.addImage(firma.dataUrl, firma.formato, x0 + (anchoBloque - w) / 2, yLinea - h - 1, w, h);
+    }
+    doc.setDrawColor(120); doc.line(x0, yLinea, x0 + anchoBloque, yLinea);
+    doc.text(texto, x0 + anchoBloque / 2, yLinea + 5, { align: "center" });
+  });
+  y = yLinea + 8;
 
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text("Documento generado por Control Ferretería — Municipalidad de Doñihue", M, 288);
@@ -2392,8 +2410,12 @@ async function vistaConvenio() {
   const c = (contratos || [])[0] || {};
   const nuevo = !c.id;
 
-  // ¿ya hay una firma cargada? (bucket privado "firmas", objeto fijo "director.png")
-  const { data: firmaHoy } = await sb.storage.from("firmas").createSignedUrl("director.png", 60);
+  // ¿qué firmas hay cargadas? (bucket privado "firmas", un objeto fijo por firma)
+  const firmasHoy = {};
+  for (const f of FIRMAS) {
+    const { data } = await sb.storage.from("firmas").createSignedUrl(f.archivo, 300);
+    firmasHoy[f.archivo] = data?.signedUrl || null;
+  }
 
   vista().innerHTML = `
     <div class="card">
@@ -2423,6 +2445,8 @@ async function vistaConvenio() {
       <p class="error oculto" id="cv-error"></p>
       <p class="ok-msg oculto" id="cv-ok"></p>
     </div>
+
+    ${FIRMAS.map(f => tarjetaFirma(f, firmasHoy[f.archivo])).join("")}
 
     ${(contratos || []).length > 1 ? `
       <div class="card">
@@ -2479,29 +2503,104 @@ async function vistaConvenio() {
     if (nuevo) setTimeout(vistaConvenio, 800);
   });
 
-  const fdSubir = document.getElementById("fd-subir");
-  if (fdSubir) fdSubir.addEventListener("click", async () => {
-    const errorEl = document.getElementById("fd-error");
-    const okEl = document.getElementById("fd-ok");
-    errorEl.classList.add("oculto"); okEl.classList.add("oculto");
-    const file = document.getElementById("fd-archivo").files[0];
-    if (!file) { errorEl.textContent = "Elige una imagen primero."; errorEl.classList.remove("oculto"); return; }
-    if (file.size > 3 * 1024 * 1024) { errorEl.textContent = "La imagen supera los 3 MB."; errorEl.classList.remove("oculto"); return; }
-    fdSubir.disabled = true;
-    const { error } = await sb.storage.from("firmas").upload("director.png", file, { upsert: true, contentType: file.type });
-    fdSubir.disabled = false;
-    if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
-    okEl.textContent = "Firma guardada."; okEl.classList.remove("oculto");
-    setTimeout(vistaConvenio, 700);
-  });
+  vista().querySelectorAll(".firma-card").forEach(card => {
+    const archivo = card.dataset.firma;
+    const errorEl = card.querySelector(".firma-error");
+    const okEl = card.querySelector(".firma-ok");
+    const btnSubir = card.querySelector(".firma-subir");
 
-  const fdQuitar = document.getElementById("fd-quitar");
-  if (fdQuitar) fdQuitar.addEventListener("click", async () => {
-    if (!confirm("¿Quitar la firma cargada? El PDF oficial dejará de estamparla.")) return;
-    const { error } = await sb.storage.from("firmas").remove(["director.png"]);
-    if (error) { alert("No se pudo quitar: " + error.message); return; }
-    vistaConvenio();
+    btnSubir.addEventListener("click", async () => {
+      errorEl.classList.add("oculto"); okEl.classList.add("oculto");
+      const file = card.querySelector(".firma-archivo").files[0];
+      if (!file) { errorEl.textContent = "Elige una imagen primero."; errorEl.classList.remove("oculto"); return; }
+      if (file.size > 8 * 1024 * 1024) { errorEl.textContent = "La imagen supera los 8 MB."; errorEl.classList.remove("oculto"); return; }
+      btnSubir.disabled = true;
+      try {
+        const blob = await comprimirFirma(file);
+        const { error } = await sb.storage.from("firmas").upload(archivo, blob, { upsert: true, contentType: "image/png" });
+        if (error) throw error;
+        okEl.textContent = "Firma guardada."; okEl.classList.remove("oculto");
+        setTimeout(vistaConvenio, 700);
+      } catch (e) {
+        errorEl.textContent = "No se pudo guardar: " + e.message; errorEl.classList.remove("oculto");
+      }
+      btnSubir.disabled = false;
+    });
+
+    const btnQuitar = card.querySelector(".firma-quitar");
+    if (btnQuitar) btnQuitar.addEventListener("click", async () => {
+      if (!confirm("¿Eliminar esta firma? La hoja de solicitud dejará de estamparla.")) return;
+      const { error } = await sb.storage.from("firmas").remove([archivo]);
+      if (error) { alert("No se pudo eliminar: " + error.message); return; }
+      vistaConvenio();
+    });
   });
+}
+
+// ---------------------------------------------------------------------
+// Firmas que se estampan en la hoja de solicitud (PNG en el bucket privado
+// "firmas"; solo el Administrador las carga, desde "Convenio / ferretería").
+// ---------------------------------------------------------------------
+const FIRMAS = [
+  { archivo: "director.png", titulo: "Firma y timbre del Director", subtitulo: "Aparecerá en la parte inferior de cada solicitud impresa, una vez aprobada" },
+  { archivo: "ito.png", titulo: "Firma del Encargado de Operaciones (ITO)", subtitulo: "Aparecerá en la parte inferior de cada solicitud impresa" },
+];
+
+function tarjetaFirma(f, url) {
+  return `<div class="card firma-card" data-firma="${f.archivo}">
+    <div class="firma-head"><h4>✍ ${esc(f.titulo)}</h4><p>${esc(f.subtitulo)}</p></div>
+    <div class="firma-cuerpo">
+      <div>
+        <label style="margin-top:0">Vista previa actual</label>
+        <div class="firma-preview">${url ? `<img src="${esc(url)}" alt="Firma cargada">` : `<span class="hint">Aún no hay firma cargada.</span>`}</div>
+      </div>
+      <div>
+        <label style="margin-top:0">Cargar nueva firma</label>
+        <p class="hint" style="margin-top:0">PNG o JPG con fondo blanco o transparente. Se comprimirá automáticamente.</p>
+        <input type="file" class="firma-archivo" accept="image/png,image/jpeg">
+        <button class="primario firma-subir">Guardar firma</button>
+        ${url ? `<button class="secundario firma-quitar" style="margin-top:.5rem">Eliminar firma</button>` : ""}
+        <p class="error oculto firma-error"></p>
+        <p class="ok-msg oculto firma-ok"></p>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Reduce la imagen (máx. 900 px de ancho) y la guarda como PNG, conservando la transparencia.
+function comprimirFirma(file, anchoMax = 900) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, anchoMax / img.naturalWidth);
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * k);
+      c.height = Math.round(img.naturalHeight * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => b ? resolve(b) : reject(new Error("No se pudo procesar la imagen.")), "image/png");
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("El archivo no es una imagen válida.")); };
+    img.src = url;
+  });
+}
+
+// Descarga una firma del bucket privado para estamparla en el PDF; null si no hay.
+async function cargarFirma(nombre) {
+  try {
+    const { data: blob, error } = await sb.storage.from("firmas").download(nombre);
+    if (error || !blob) return null;
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob);
+    });
+    const dim = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight }); im.onerror = rej; im.src = dataUrl;
+    });
+    return { dataUrl, formato: dataUrl.startsWith("data:image/jpeg") ? "JPEG" : "PNG", ...dim };
+  } catch { return null; }
 }
 
 // ---------------------------------------------------------------------

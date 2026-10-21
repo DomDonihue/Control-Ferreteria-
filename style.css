@@ -40,6 +40,15 @@ body{
 }
 .oculto{ display:none !important; }
 
+.firma-card{ padding:0; overflow:hidden; }
+.firma-head{ background:linear-gradient(135deg, var(--navy), var(--navy-2)); color:#fff; padding:14px 20px; }
+.firma-head h4{ margin:0; color:#fff; font-size:1rem; }
+.firma-head p{ margin:2px 0 0; color:rgba(255,255,255,.75); font-size:.8rem; }
+.firma-cuerpo{ display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:18px 20px; }
+.firma-preview{ border:1px dashed var(--border); border-radius:12px; background:#fff; min-height:150px; display:flex; align-items:center; justify-content:center; padding:10px; }
+.firma-preview img{ max-width:100%; max-height:150px; }
+@media (max-width:640px){ .firma-cuerpo{ grid-template-columns:1fr; } }
+
 .buscador{ position:relative; }
 .buscador-res{
   position:absolute; left:0; right:0; z-index:30; margin-top:2px;
