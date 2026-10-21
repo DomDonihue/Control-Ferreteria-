@@ -2779,16 +2779,29 @@ async function extraerFormularioPDF(file) {
   const doc = await PDFLib.PDFDocument.load(await file.arrayBuffer());
   const form = doc.getForm();
   const T = (n) => { try { return (form.getTextField(n).getText() || "").trim(); } catch { return ""; } };
+  const D = (n) => { try { return (form.getDropdown(n).getSelected()[0] || "").trim(); } catch { return T(n); } };
   const num = (v) => parseFloat(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}\b)/g, "").replace(",", ".")) || 0;
   const items = [];
-  for (let r = 0; r < 12; r++) {
-    const producto = T(`mat_r${r}_c0`);
-    const cantidad = num(T(`mat_r${r}_c1`));
-    if (producto && cantidad > 0) items.push({ producto, cantidad, unidad: T(`mat_r${r}_c2`) });
+  // Formulario de cotización (producto_N, cantidad_N, unidad_N)…
+  for (let r = 1; r <= 20; r++) {
+    const producto = T(`producto_${r}`);
+    const cantidad = num(T(`cantidad_${r}`));
+    if (producto && cantidad > 0) items.push({ producto, cantidad, unidad: T(`unidad_${r}`) });
+  }
+  // …o, si no es ese, el Formulario Único anterior (mat_rN_cK).
+  if (!items.length) {
+    for (let r = 0; r < 12; r++) {
+      const producto = T(`mat_r${r}_c0`);
+      const cantidad = num(T(`mat_r${r}_c1`));
+      if (producto && cantidad > 0) items.push({ producto, cantidad, unidad: T(`mat_r${r}_c2`) });
+    }
   }
   return {
-    unidad: T("unidad_solicitante"), responsable: T("responsable_requerimiento"),
-    ubicacion: T("ubicacion_uso"), motivo: T("fundamento") || T("desc_requerimiento"), items,
+    unidad: D("unidad_interna") || T("unidad_solicitante"),
+    responsable: T("responsable") || T("responsable_requerimiento"),
+    ubicacion: T("ubicacion") || T("ubicacion_uso"),
+    motivo: T("motivo") || T("fundamento") || T("desc_requerimiento"),
+    items,
   };
 }
 
@@ -2858,9 +2871,10 @@ async function vistaNuevoProceso(id) {
       ${soloObras && !unidades.length ? `<p class="error">Tu perfil no tiene una dirección asignada. Pide al administrador que te la asigne en Usuarios.</p>` : ""}
 
       <div style="border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin:12px 0;background:var(--surface-2)">
-        <label style="margin-top:0">¿Ya completaste el Formulario Único en PDF? Súbelo y se leen los productos</label>
+        <label style="margin-top:0">¿Ya completaste el formulario de cotización en PDF? Súbelo y se leen los productos</label>
         <input id="np-pdf" type="file" accept="application/pdf">
-        <p class="hint" id="np-pdf-msg">Toma de ahí los productos, cantidades y unidades de medida (también la unidad, el responsable, la ubicación y el motivo). Después puedes corregir lo que haga falta.</p>
+        <p class="hint" id="np-pdf-msg">Toma de ahí los productos, cantidades y unidades de medida (también la unidad, el responsable, la ubicación y el motivo). Después puedes corregir lo que haga falta.
+          ¿Aún no lo tienes? <a href="Documentacion/Formulario-Cotizacion-Obras.pdf" target="_blank" rel="noopener">Descargar el formulario en blanco</a>.</p>
       </div>
 
       <label>Dirección responsable</label>
