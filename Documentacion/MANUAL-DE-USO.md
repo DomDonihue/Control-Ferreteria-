@@ -82,6 +82,7 @@ Las demás direcciones siguen con el procedimiento anterior.
 - **Revisar:** en **Solicitudes**, las de Obras en *pendiente* tienen **Ver**, **Dar V°B°** y **Rechazar** (el rechazo pide motivo).
 - **Expedientes → Abrir** una solicitud aprobada:
   - **Descargar hoja de solicitud (PDF)** y enviarla a la empresa → **Marcar como enviada**. La hoja trae cada producto con su cantidad, **valor unitario neto** y subtotal por ítem, y al final el **total neto, IVA y total estimado** según el precio de cada artículo en el Catálogo. El valor final se verifica con la guía de despacho y la factura.
+  - **Orden de compra:** en el expediente, registra el N°, la fecha y el PDF de la orden de compra (el bloque aparece en todas las solicitudes; las fuera de catálogo la registran junto al decreto).
   - Al llegar el material: **Registrar guía de despacho** (N°, fechas, neto, IVA, bruto, adjunto). Puede haber varias → **Marcar material recibido**.
   - **Registrar factura** (N°, fecha, montos, fecha de pago, adjunto). Se descuenta del convenio.
   - **Nota de crédito** si corresponde y **Cerrar expediente**.

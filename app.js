@@ -1703,7 +1703,7 @@ async function vistaExpediente(id) {
         <p class="hint">${ofertasExp.filter(o => o.archivo_url).map(o => `${enlaceArchivo(o.archivo_url, `Cotización ${esc(o.proveedor)}`)}`).join(" · ") || "Sin archivos adjuntos."}</p>
       </div>` : ""}
 
-    ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : ""}
+    ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : bloqueOrdenCompra(s, opero)}
 
     <!-- GUÍAS DE DESPACHO -->
     <div class="card">
@@ -1876,39 +1876,77 @@ function bloqueBitacora(rows) {
 }
 
 // ---------- Pestaña Bitácora (global, roles de control) ----------
+// Se entra por solicitud, ordenadas por su número; al elegir una se ve la
+// bitácora de todo su expediente (solicitud, guías, factura, convenio…).
+const _cmpNumero = (a, b) => {
+  const x = numSol(a), y = numSol(b);
+  if (!x || !y) return x ? -1 : y ? 1 : 0;
+  return x.localeCompare(y, "es", { numeric: true });
+};
+
 async function vistaBitacora() {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
-  const { data: rows, error } = await sb.from("bitacora")
-    .select("*").order("id", { ascending: false }).limit(400);
-  if (error) {
-    vista().innerHTML = `<div class="card error">No se pudo leer la bitácora: ${error.message}
+  const [{ data: sols, error }, { data: movs, error: errMov }] = await Promise.all([
+    cargarTodas(() => sb.from("solicitud").select("id, correlativo, n_solicitud, fecha_solicitud, motivo, estado, solicitante, unidad(nombre)").order("id")),
+    cargarTodas(() => sb.from("bitacora").select("id, solicitud_id, ocurrido_en").order("id")),
+  ]);
+  if (error || errMov) {
+    vista().innerHTML = `<div class="card error">No se pudo leer la bitácora: ${esc((error || errMov).message)}
       <br><small>Falta correr <code>Documentacion/anulacion-y-bitacora.sql</code> en Supabase.</small></div>`;
     return;
   }
-  const pintar = (lista) => {
-    document.getElementById("bit-tbody").innerHTML =
-      lista.length ? lista.map(_filaBitacora).join("")
-                   : `<tr><td colspan="5" class="hint">Sin resultados.</td></tr>`;
-    document.getElementById("bit-cuenta").textContent = `${lista.length} de ${(rows || []).length}`;
-  };
+  const resumen = {};
+  (movs || []).forEach(m => {
+    const k = m.solicitud_id || "__sin";
+    const r = resumen[k] || (resumen[k] = { n: 0, ultimo: null });
+    r.n++;
+    if (!r.ultimo || m.ocurrido_en > r.ultimo) r.ultimo = m.ocurrido_en;
+  });
+  const filas = (sols || []).slice().sort(_cmpNumero);
+  if (resumen.__sin) filas.push({ id: "__sin", correlativo: "", motivo: "Movimientos sin solicitud (convenio)", estado: "", unidad: null });
+
   vista().innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">Bitácora de movimientos</h3>
-      <p class="hint">Últimos 400 registros. Filtra por nombre, N° de documento, acción o motivo.</p>
-      <input id="bit-filtro" placeholder="Buscar… (ej: anuló, 45871, Eugenio, dígito)">
-      <p class="hint" id="bit-cuenta"></p>
-      <table class="bitacora-lista">
-        <thead><tr><th>Fecha y hora</th><th>Quién</th><th>Acción</th><th>Motivo / cambio</th><th class="num">Monto</th></tr></thead>
-        <tbody id="bit-tbody"></tbody>
-      </table>
+      <p class="hint">Elige una solicitud para ver todo lo que pasó con su expediente: ingreso, aprobaciones, guías, factura, anulaciones y descuentos del convenio.</p>
+      ${listaBarra("bit", ESTADOS_SOLICITUD)}
     </div>`;
-  pintar(rows || []);
-  document.getElementById("bit-filtro").addEventListener("input", (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    if (!q) { pintar(rows || []); return; }
-    pintar((rows || []).filter(r =>
-      JSON.stringify(r).toLowerCase().includes(q)));
-  });
+  listaCrear("bit", filas,
+    (s) => `${numSol(s)} ${s.motivo} ${s.unidad?.nombre} ${s.solicitante} ${s.fecha_solicitud}`,
+    `<tr><th>N°</th><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Movimientos</th><th>Último</th><th></th></tr>`,
+    (s) => {
+      const r = resumen[s.id] || { n: 0, ultimo: null };
+      return `<tr>
+        <td class="num">${esc(numSol(s)) || "—"}</td>
+        <td>${s.fecha_solicitud || ""}</td>
+        <td>${esc(s.unidad?.nombre)}</td>
+        <td>${esc(s.motivo)}</td>
+        <td>${s.estado ? `<span class="pill ${s.estado}">${s.estado}</span>` : "—"}</td>
+        <td class="num">${r.n || "—"}</td>
+        <td>${r.ultimo ? _fechaHora(r.ultimo) : "—"}</td>
+        <td><button class="secundario" onclick="bitacoraSolicitud('${s.id}')">Ver bitácora</button></td>
+      </tr>`;
+    });
+  listaPintar("bit");
+}
+
+async function bitacoraSolicitud(id) {
+  vista().innerHTML = "<div class='card'>Cargando…</div>";
+  const sin = id === "__sin";
+  const consulta = sb.from("bitacora").select("*").order("id", { ascending: true });
+  const [{ data: s }, { data: rows, error }] = await Promise.all([
+    sin ? Promise.resolve({ data: null }) : sb.from("solicitud").select("id, correlativo, n_solicitud, motivo, estado, fecha_solicitud, solicitante, unidad(nombre)").eq("id", id).single(),
+    sin ? consulta.is("solicitud_id", null) : consulta.eq("solicitud_id", id),
+  ]);
+  if (error) { vista().innerHTML = `<div class="card error">${esc(error.message)}</div>`; return; }
+  vista().innerHTML = `
+    <div class="card">
+      <button class="secundario" onclick="vistaBitacora()">‹ Volver a la bitácora</button>
+      <h3 style="margin:.8rem 0 .2rem">${s ? `Solicitud ${esc(numSol(s)) || "sin número"}` : "Movimientos sin solicitud"}</h3>
+      ${s ? `<p class="hint" style="margin:0">${esc(s.unidad?.nombre)} · ${s.fecha_solicitud || ""} · ${esc(s.motivo)} · <span class="pill ${s.estado}">${s.estado}</span></p>
+      <p style="margin:.6rem 0 0"><button class="secundario" onclick="abrirExpediente('${s.id}')">Abrir expediente</button></p>` : ""}
+    </div>
+    ${bloqueBitacora(rows || [])}`;
 }
 
 // ---------- Compra por Mercado Público (solo solicitudes tipo "especial") ----------
@@ -2090,6 +2128,50 @@ async function guardarCotizacion(solicitudId) {
   } finally { _unlock(); }
 }
 
+// Orden de compra de las solicitudes normales y de Obras (las especiales la
+// registran en su propio bloque). Usa las mismas columnas de `solicitud`.
+function bloqueOrdenCompra(s, opero) {
+  return `
+    <div class="card">
+      <div class="exp-seccion"><h4>Orden de compra</h4></div>
+      <div class="exp-datos">
+        <div><div class="d-k">N° orden de compra</div>${esc(s.n_orden_compra) || "—"}</div>
+        <div><div class="d-k">Fecha OC</div>${s.fecha_oc || "—"}</div>
+        <div><div class="d-k">Orden de compra</div>${s.oc_url ? enlaceArchivo(s.oc_url, "ver documento") : "sin adjunto"}</div>
+      </div>
+      ${opero ? `
+        <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
+          <h4 style="margin-top:0">${s.n_orden_compra || s.oc_url ? "Actualizar" : "Registrar"} orden de compra</h4>
+          <div class="linea-detalle" style="grid-template-columns:1fr 1fr">
+            <div><label>N° orden de compra</label><input id="oc-num" value="${esc(s.n_orden_compra)}" placeholder="Ej: 2440-15-CM26"></div>
+            <div><label>Fecha OC</label><input id="oc-fecha" type="date" value="${s.fecha_oc || ""}"></div>
+          </div>
+          <label>Adjuntar orden de compra (PDF)</label>
+          <input id="oc-archivo" type="file" accept=".pdf,image/*">
+          <button class="primario" onclick="guardarOrdenCompra('${s.id}')">Guardar orden de compra</button>
+          <p class="error oculto" id="oc-error"></p>
+        </div>` : ""}
+    </div>`;
+}
+
+async function guardarOrdenCompra(solicitudId) {
+  if (!_lock()) return;
+  try {
+    const errorEl = document.getElementById("oc-error");
+    errorEl.classList.add("oculto");
+    const { url, error: up } = await subirArchivo("memos", document.getElementById("oc-archivo").files[0]);
+    if (up) { errorEl.textContent = up; errorEl.classList.remove("oculto"); return; }
+    const payload = {
+      n_orden_compra: document.getElementById("oc-num").value.trim() || null,
+      fecha_oc: document.getElementById("oc-fecha").value || null,
+    };
+    if (url) payload.oc_url = url;
+    const { error } = await sb.from("solicitud").update(payload).eq("id", solicitudId);
+    if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
+    vistaExpediente(solicitudId);
+  } finally { _unlock(); }
+}
+
 async function guardarDocumentacionEspecial(solicitudId) {
   if (!_lock()) return;
   try {
@@ -2207,11 +2289,32 @@ async function guardarFactura(solicitudId) {
 // (descontar_factura): el navegador ya no escribe en `compra`.
 async function descontarDelConvenio(facturaId) {
   const { data, error } = await sb.rpc("descontar_factura", { p_factura_id: facturaId });
+  // Mientras no se haya corrido seguridad-endurecimiento.sql la función no existe:
+  // se usa el descuento anterior. Cuando exista, esta vía queda sin uso.
+  if (error && (error.code === "PGRST202" || /could not find the function/i.test(error.message || ""))) {
+    return descontarDirecto(facturaId);
+  }
   if (error) {
     alert("No se pudo descontar del convenio: " + error.message + "\nRevísalo en el Resumen.");
     return false;
   }
   return data?.descontado !== false || /ya estaba/i.test(data?.motivo || "");
+}
+
+async function descontarDirecto(facturaId) {
+  const { data: f } = await sb.from("factura").select("solicitud_id, numero, monto_bruto").eq("id", facturaId).single();
+  const { data: contrato } = await sb.from("contrato").select("id, monto_tope_anual")
+    .eq("estado", "vigente").order("creado_en", { ascending: false }).limit(1).maybeSingle();
+  if (!f || !contrato || !contrato.monto_tope_anual) {
+    alert("No hay un contrato vigente con monto tope anual cargado — no se pudo descontar del convenio. Revísalo en 'Convenio / ferretería'.");
+    return false;
+  }
+  const { error } = await sb.from("compra").insert({
+    contrato_id: contrato.id, solicitud_id: f.solicitud_id,
+    n_oc: "FACT " + f.numero, monto_total: f.monto_bruto, creado_por: perfilActual.id,
+  });
+  if (error) { alert("No se pudo descontar del convenio: " + error.message + "\nRevísalo en el Resumen."); return false; }
+  return true;
 }
 
 async function reintentarDescuentoFactura(solicitudId, facturaId) {
