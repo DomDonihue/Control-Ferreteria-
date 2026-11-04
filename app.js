@@ -1850,7 +1850,7 @@ function _filaBitacora(r) {
   const d = r.detalle || {};
   let cambio = "";
   if (r.accion === "cambiar_estado" && d.de && d.a) cambio = `${d.de} → ${d.a}`;
-  else if (r.accion === "crear" && r.entidad === "solicitud") cambio = `ingresó${d.n ? " N° " + d.n : ""}${d.tipo ? " (" + d.tipo + ")" : ""}`;
+  else if (r.accion === "crear" && r.entidad === "solicitud") cambio = `ingresó${d.n ? " N° " + d.n : ""}${{ operaciones: " (Solicitud Obras)", especial: " (fuera de catálogo)" }[d.tipo] || ""}`;
   const texto = [cambio, r.motivo ? `Motivo: ${r.motivo}` : ""].filter(Boolean).join(" · ");
   return `<tr>
     <td>${_fechaHora(r.ocurrido_en)}</td>
