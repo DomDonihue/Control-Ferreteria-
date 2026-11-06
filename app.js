@@ -473,13 +473,14 @@ async function vistaResumen() {
   const verProyeccion = ["admin", "admin_ito", "lector_operativo", "lector_pagos", "lector_ejecutivo"].includes(rolEfectivo());
   const tope = Number(data.tope_anual) || 0;
   const facturado = Number(data.comprometido) || 0;
-  let solicitado = 0, sinPrecio = 0;
+  let solicitado = 0, sinPrecio = 0, nSolicitadas = 0;
   if (verProyeccion) {
     (solicitudes || []).forEach(s => {
       const det = s.solicitud_detalle || [];
       const t = totalesDetalle(det);
       if (["pendiente", "visada", "aprobada", "enviada", "recibida"].includes(s.estado)) {
         solicitado += t.bruto;
+        nSolicitadas++;
         if (!det.length || t.sinValor) sinPrecio++;
       }
     });
@@ -503,7 +504,7 @@ async function vistaResumen() {
       </div>
     </div>
     <div class="stat-row${verProyeccion ? "" : " tres"}">
-      ${verProyeccion ? `<div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">Solicitado (estimado)</div><div class="value">${money(solicitado)}</div></div>` : ""}
+      ${verProyeccion ? `<div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">Solicitado (estimado)</div><div class="value">${money(solicitado)}</div><div class="hint" style="position:relative;z-index:1;margin-top:.3rem">${nSolicitadas} solicitud${nSolicitadas === 1 ? "" : "es"}${sinPrecio ? ` · ${sinPrecio} sin precio` : ""}</div></div>` : ""}
       <div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">${verProyeccion ? "Comprometido (facturado)" : "Comprometido"}</div><div class="value">${money(facturado)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico green">${ICONOS.shield}</div><div class="label">Saldo disponible</div><div class="value">${money(saldo)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico purple">${ICONOS.percent}</div><div class="label">% usado</div><div class="value">${pct}%</div></div>
