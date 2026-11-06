@@ -1703,7 +1703,7 @@ async function vistaExpediente(id) {
         <p class="hint">${ofertasExp.filter(o => o.archivo_url).map(o => `${enlaceArchivo(o.archivo_url, `Cotización ${esc(o.proveedor)}`)}`).join(" · ") || "Sin archivos adjuntos."}</p>
       </div>` : ""}
 
-    ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : bloqueOrdenCompra(s, opero)}
+    ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : ""}
 
     <!-- GUÍAS DE DESPACHO -->
     <div class="card">
@@ -2125,50 +2125,6 @@ async function guardarCotizacion(solicitudId) {
   });
   if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
   vistaExpediente(solicitudId);
-  } finally { _unlock(); }
-}
-
-// Orden de compra de las solicitudes normales y de Obras (las especiales la
-// registran en su propio bloque). Usa las mismas columnas de `solicitud`.
-function bloqueOrdenCompra(s, opero) {
-  return `
-    <div class="card">
-      <div class="exp-seccion"><h4>Orden de compra</h4></div>
-      <div class="exp-datos">
-        <div><div class="d-k">N° orden de compra</div>${esc(s.n_orden_compra) || "—"}</div>
-        <div><div class="d-k">Fecha OC</div>${s.fecha_oc || "—"}</div>
-        <div><div class="d-k">Orden de compra</div>${s.oc_url ? enlaceArchivo(s.oc_url, "ver documento") : "sin adjunto"}</div>
-      </div>
-      ${opero ? `
-        <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
-          <h4 style="margin-top:0">${s.n_orden_compra || s.oc_url ? "Actualizar" : "Registrar"} orden de compra</h4>
-          <div class="linea-detalle" style="grid-template-columns:1fr 1fr">
-            <div><label>N° orden de compra</label><input id="oc-num" value="${esc(s.n_orden_compra)}" placeholder="Ej: 2440-15-CM26"></div>
-            <div><label>Fecha OC</label><input id="oc-fecha" type="date" value="${s.fecha_oc || ""}"></div>
-          </div>
-          <label>Adjuntar orden de compra (PDF)</label>
-          <input id="oc-archivo" type="file" accept=".pdf,image/*">
-          <button class="primario" onclick="guardarOrdenCompra('${s.id}')">Guardar orden de compra</button>
-          <p class="error oculto" id="oc-error"></p>
-        </div>` : ""}
-    </div>`;
-}
-
-async function guardarOrdenCompra(solicitudId) {
-  if (!_lock()) return;
-  try {
-    const errorEl = document.getElementById("oc-error");
-    errorEl.classList.add("oculto");
-    const { url, error: up } = await subirArchivo("memos", document.getElementById("oc-archivo").files[0]);
-    if (up) { errorEl.textContent = up; errorEl.classList.remove("oculto"); return; }
-    const payload = {
-      n_orden_compra: document.getElementById("oc-num").value.trim() || null,
-      fecha_oc: document.getElementById("oc-fecha").value || null,
-    };
-    if (url) payload.oc_url = url;
-    const { error } = await sb.from("solicitud").update(payload).eq("id", solicitudId);
-    if (error) { errorEl.textContent = "No se pudo guardar: " + error.message; errorEl.classList.remove("oculto"); return; }
-    vistaExpediente(solicitudId);
   } finally { _unlock(); }
 }
 
