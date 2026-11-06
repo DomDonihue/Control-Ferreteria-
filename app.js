@@ -491,8 +491,18 @@ async function vistaResumen() {
   const estadoClase = pct >= 95 ? "critical" : pct >= 80 ? "warn" : "ok";
 
   vista().innerHTML = `
-    <div class="stat-row">
-      <div class="stat"><div class="stat-ico blue">${ICONOS.wallet}</div><div class="label">Tope anual</div><div class="value">${money(tope)}</div></div>
+    <div class="stat stat-tope ${estadoClase}">
+      <div class="tope-fila">
+        <div><div class="stat-ico blue">${ICONOS.wallet}</div><div class="label">Tope anual</div><div class="value">${money(tope)}</div></div>
+        <div class="tope-barra" title="${esc(`Comprometido ${pctFact}%${verProyeccion ? ` · Solicitado ${pctSol}%` : ""} · Saldo ${Math.max(0, Math.round((100 - pct) * 10) / 10)}%`)}">
+          <div class="barra-consumo">
+            <i style="width:${Math.min(100, verProyeccion ? pctFact : pct)}%;background:var(--gold)"></i>
+            ${verProyeccion ? `<i style="width:${Math.min(Math.max(0, 100 - pctFact), pctSol)}%;background:var(--gold-tint)"></i>` : ""}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stat-row${verProyeccion ? "" : " tres"}">
       ${verProyeccion ? `<div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">Solicitado (estimado)</div><div class="value">${money(solicitado)}</div></div>` : ""}
       <div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">${verProyeccion ? "Comprometido (facturado)" : "Comprometido"}</div><div class="value">${money(facturado)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico green">${ICONOS.shield}</div><div class="label">Saldo disponible</div><div class="value">${money(saldo)}</div></div>

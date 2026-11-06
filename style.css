@@ -171,6 +171,15 @@ nav.tabs button.activo .nav-ico{ color:#fff; }
 .stat-ico.purple{ background:var(--purple-tint);  color:var(--purple); }
 .stat-ico.red   { background:var(--critical-tint);color:var(--critical); }
 
+/* ---------- INICIO: tope arriba y desglose debajo ---------- */
+.stat-tope{ margin-bottom:1.2rem; }
+.stat-tope .tope-fila{ display:flex; align-items:center; gap:2rem; flex-wrap:wrap; position:relative; z-index:1; }
+.stat-tope .tope-barra{ flex:1 1 280px; }
+.barra-consumo{ display:flex; height:16px; border-radius:8px; overflow:hidden; background:var(--surface-2); border:1px solid var(--border); }
+.barra-consumo i{ display:block; height:100%; }
+.stat-row.tres{ grid-template-columns:repeat(3,1fr); }
+.stat-row .stat .value{ font-size:clamp(1.05rem,1.85vw,1.6rem); white-space:nowrap; }
+
 /* ---------- GRÁFICOS (Resumen) ---------- */
 .charts{ display:grid; grid-template-columns:190px 1fr; gap:20px; align-items:start; }
 .donut-wrap{ display:flex; flex-direction:column; align-items:center; gap:8px; }
