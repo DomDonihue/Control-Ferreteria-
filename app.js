@@ -464,23 +464,23 @@ async function vistaResumen() {
       .order("id")),
   ]);
 
-  // Lo pedido y aprobado que aún no tiene factura se descuenta del saldo con su
-  // monto estimado (precio de cada producto + IVA); cuando llega la factura, el
-  // valor real la reemplaza (la solicitud pasa a "facturada" y ya no se cuenta aquí).
+  // Lo solicitado que aún no tiene factura se descuenta del saldo desde que se
+  // ingresa la solicitud, con su monto estimado (precio de cada producto + IVA);
+  // cuando se registra la factura, el valor real ("comprometido") la reemplaza
+  // (la solicitud pasa a "facturada" y ya no se cuenta como solicitada). Las
+  // rechazadas devuelven su monto.
   // Solo lo calculan los roles que ven todas las solicitudes.
   const verProyeccion = ["admin", "admin_ito", "lector_operativo", "lector_pagos", "lector_ejecutivo"].includes(rolEfectivo());
   const tope = Number(data.tope_anual) || 0;
   const facturado = Number(data.comprometido) || 0;
-  let solicitado = 0, enRevision = 0, sinPrecio = 0;
+  let solicitado = 0, sinPrecio = 0;
   if (verProyeccion) {
     (solicitudes || []).forEach(s => {
       const det = s.solicitud_detalle || [];
       const t = totalesDetalle(det);
-      if (["aprobada", "enviada", "recibida"].includes(s.estado)) {
+      if (["pendiente", "visada", "aprobada", "enviada", "recibida"].includes(s.estado)) {
         solicitado += t.bruto;
         if (!det.length || t.sinValor) sinPrecio++;
-      } else if (["pendiente", "visada"].includes(s.estado)) {
-        enRevision += t.bruto;
       }
     });
   }
@@ -494,14 +494,13 @@ async function vistaResumen() {
     <div class="stat-row">
       <div class="stat"><div class="stat-ico blue">${ICONOS.wallet}</div><div class="label">Tope anual</div><div class="value">${money(tope)}</div></div>
       ${verProyeccion ? `<div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">Solicitado (estimado)</div><div class="value">${money(solicitado)}</div></div>` : ""}
-      <div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">${verProyeccion ? "Facturado (real)" : "Comprometido"}</div><div class="value">${money(facturado)}</div></div>
+      <div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">${verProyeccion ? "Comprometido (facturado)" : "Comprometido"}</div><div class="value">${money(facturado)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico green">${ICONOS.shield}</div><div class="label">Saldo disponible</div><div class="value">${money(saldo)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico purple">${ICONOS.percent}</div><div class="label">% usado</div><div class="value">${pct}%</div></div>
     </div>
     ${verProyeccion ? `<div class="card">
-      <p class="hint" style="margin:0"><strong>Solicitado</strong>: solicitudes aprobadas, enviadas o recibidas que aún no tienen factura, con el precio de cada producto más IVA.
-        Cuando llega la factura, su valor real reemplaza al estimado. <strong>Saldo disponible = tope − facturado − solicitado.</strong></p>
-      ${enRevision ? `<p class="hint" style="margin:.4rem 0 0">En revisión (pendientes y visadas, todavía no descontadas): ${money(enRevision)}.</p>` : ""}
+      <p class="hint" style="margin:0"><strong>Solicitado</strong>: solicitudes ingresadas que aún no tienen factura (no rechazadas), con el precio de cada producto más IVA; baja el saldo apenas se ingresa la solicitud.
+        <strong>Comprometido</strong>: lo ya facturado; aparece cuando se registra la factura y reemplaza al estimado. <strong>Saldo disponible = tope − comprometido − solicitado.</strong></p>
       ${sinPrecio ? `<p class="hint" style="margin:.4rem 0 0">⚠ ${sinPrecio} solicitud${sinPrecio === 1 ? "" : "es"} con algún producto sin precio: el monto real puede ser mayor.</p>` : ""}
     </div>` : ""}
     <div class="card">
@@ -514,7 +513,7 @@ async function vistaResumen() {
         <div class="donut-wrap">
           ${svgDonut(verProyeccion ? pctFact : pct, verProyeccion ? pctSol : 0)}
           <div class="legend">
-            <span><i style="background:var(--gold)"></i>${verProyeccion ? "Facturado (real)" : "Comprometido"}</span>
+            <span><i style="background:var(--gold)"></i>${verProyeccion ? "Comprometido (facturado)" : "Comprometido"}</span>
             ${verProyeccion ? `<span><i style="background:var(--gold-tint);border:1px solid var(--gold)"></i>Solicitado (estimado)</span>` : ""}
             <span><i style="background:var(--surface-2);border:1px solid var(--border)"></i>Saldo</span>
           </div>

@@ -102,7 +102,7 @@ Las demás direcciones siguen con el procedimiento anterior.
 - **Catálogo:** mantiene el listado de productos.
 
 ## 5. Pantalla Inicio
-Tope anual, **solicitado (estimado)**, **facturado (real)**, saldo disponible y % usado. Lo solicitado es lo aprobado, enviado o recibido que aún no tiene factura (precio de cada producto más IVA) y se descuenta del saldo apenas se aprueba; cuando llega la factura, su valor real reemplaza al estimado. Lo pendiente de aprobar se muestra aparte y no descuenta. Lo ven los roles que ven todas las solicitudes (Administrador, ITO, Director, DAF y Alcalde); consumo por unidad (haz clic en una barra para ver sus expedientes) y solicitudes por mes.
+Tope anual, **solicitado (estimado)**, **comprometido (facturado)**, saldo disponible y % usado. Lo solicitado es todo lo ingresado que aún no tiene factura y no fue rechazado (precio de cada producto más IVA): baja el saldo apenas se ingresa la solicitud. Cuando se registra la factura, su valor real pasa a *comprometido* y reemplaza al estimado. Lo ven los roles que ven todas las solicitudes (Administrador, ITO, Director, DAF y Alcalde); consumo por unidad (haz clic en una barra para ver sus expedientes) y solicitudes por mes.
 
 ## 6. Avisos
 - La **campana** del encabezado cuenta lo pendiente: el ITO ve las de Obras por revisar y las aprobadas por tramitar; el Director ve las que esperan su V°B°.
