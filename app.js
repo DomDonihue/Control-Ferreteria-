@@ -498,11 +498,7 @@ async function vistaResumen() {
       <div class="stat ${estadoClase}"><div class="stat-ico green">${ICONOS.shield}</div><div class="label">Saldo disponible</div><div class="value">${money(saldo)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico purple">${ICONOS.percent}</div><div class="label">% usado</div><div class="value">${pct}%</div></div>
     </div>
-    ${verProyeccion ? `<div class="card">
-      <p class="hint" style="margin:0"><strong>Solicitado</strong>: solicitudes ingresadas que aún no tienen factura (no rechazadas), con el precio de cada producto más IVA; baja el saldo apenas se ingresa la solicitud.
-        <strong>Comprometido</strong>: lo ya facturado; aparece cuando se registra la factura y reemplaza al estimado. <strong>Saldo disponible = tope − comprometido − solicitado.</strong></p>
-      ${sinPrecio ? `<p class="hint" style="margin:.4rem 0 0">⚠ ${sinPrecio} solicitud${sinPrecio === 1 ? "" : "es"} con algún producto sin precio: el monto real puede ser mayor.</p>` : ""}
-    </div>` : ""}
+    ${verProyeccion && sinPrecio ? `<p class="hint">⚠ ${sinPrecio} solicitud${sinPrecio === 1 ? "" : "es"} con algún producto sin precio: el monto solicitado puede ser mayor.</p>` : ""}
     <div class="card">
       <strong>Proveedor:</strong> ${esc(data.proveedor)}
     </div>
