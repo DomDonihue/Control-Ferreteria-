@@ -456,22 +456,54 @@ async function vistaResumen() {
     vista().innerHTML = `<div class="card error">No se pudo cargar el resumen: ${error ? error.message : "sin convenio vigente"}</div>`;
     return;
   }
-  const pct = Number(data.porcentaje_usado) || 0;
-  const estadoClase = pct >= 95 ? "critical" : pct >= 80 ? "warn" : "ok";
-
   // Gráficos: si fallan (falta alguna tabla/permiso) el resumen igual se ve.
   const [{ data: facturas }, { data: solicitudes }] = await Promise.all([
     sb.from("factura").select("monto_bruto, solicitud(unidad(nombre))"),
-    sb.from("solicitud").select("creado_en, unidad(nombre)"),
+    cargarTodas(() => sb.from("solicitud")
+      .select("id, estado, creado_en, unidad(nombre), solicitud_detalle(cantidad_solicitada, precio_unitario_neto, articulo(precio_neto))")
+      .order("id")),
   ]);
+
+  // Lo pedido y aprobado que aún no tiene factura se descuenta del saldo con su
+  // monto estimado (precio de cada producto + IVA); cuando llega la factura, el
+  // valor real la reemplaza (la solicitud pasa a "facturada" y ya no se cuenta aquí).
+  // Solo lo calculan los roles que ven todas las solicitudes.
+  const verProyeccion = ["admin", "admin_ito", "lector_operativo", "lector_pagos", "lector_ejecutivo"].includes(rolEfectivo());
+  const tope = Number(data.tope_anual) || 0;
+  const facturado = Number(data.comprometido) || 0;
+  let solicitado = 0, enRevision = 0, sinPrecio = 0;
+  if (verProyeccion) {
+    (solicitudes || []).forEach(s => {
+      const det = s.solicitud_detalle || [];
+      const t = totalesDetalle(det);
+      if (["aprobada", "enviada", "recibida"].includes(s.estado)) {
+        solicitado += t.bruto;
+        if (!det.length || t.sinValor) sinPrecio++;
+      } else if (["pendiente", "visada"].includes(s.estado)) {
+        enRevision += t.bruto;
+      }
+    });
+  }
+  const saldo = verProyeccion ? tope - facturado - solicitado : Number(data.saldo_disponible);
+  const pctFact = tope ? Math.round(facturado / tope * 1000) / 10 : 0;
+  const pctSol = tope ? Math.round(solicitado / tope * 1000) / 10 : 0;
+  const pct = verProyeccion ? Math.round((pctFact + pctSol) * 10) / 10 : (Number(data.porcentaje_usado) || 0);
+  const estadoClase = pct >= 95 ? "critical" : pct >= 80 ? "warn" : "ok";
 
   vista().innerHTML = `
     <div class="stat-row">
-      <div class="stat"><div class="stat-ico blue">${ICONOS.wallet}</div><div class="label">Tope anual</div><div class="value">${money(data.tope_anual)}</div></div>
-      <div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">Comprometido</div><div class="value">${money(data.comprometido)}</div></div>
-      <div class="stat ${estadoClase}"><div class="stat-ico green">${ICONOS.shield}</div><div class="label">Saldo disponible</div><div class="value">${money(data.saldo_disponible)}</div></div>
+      <div class="stat"><div class="stat-ico blue">${ICONOS.wallet}</div><div class="label">Tope anual</div><div class="value">${money(tope)}</div></div>
+      ${verProyeccion ? `<div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">Solicitado (estimado)</div><div class="value">${money(solicitado)}</div></div>` : ""}
+      <div class="stat"><div class="stat-ico gold">${ICONOS.bag}</div><div class="label">${verProyeccion ? "Facturado (real)" : "Comprometido"}</div><div class="value">${money(facturado)}</div></div>
+      <div class="stat ${estadoClase}"><div class="stat-ico green">${ICONOS.shield}</div><div class="label">Saldo disponible</div><div class="value">${money(saldo)}</div></div>
       <div class="stat ${estadoClase}"><div class="stat-ico purple">${ICONOS.percent}</div><div class="label">% usado</div><div class="value">${pct}%</div></div>
     </div>
+    ${verProyeccion ? `<div class="card">
+      <p class="hint" style="margin:0"><strong>Solicitado</strong>: solicitudes aprobadas, enviadas o recibidas que aún no tienen factura, con el precio de cada producto más IVA.
+        Cuando llega la factura, su valor real reemplaza al estimado. <strong>Saldo disponible = tope − facturado − solicitado.</strong></p>
+      ${enRevision ? `<p class="hint" style="margin:.4rem 0 0">En revisión (pendientes y visadas, todavía no descontadas): ${money(enRevision)}.</p>` : ""}
+      ${sinPrecio ? `<p class="hint" style="margin:.4rem 0 0">⚠ ${sinPrecio} solicitud${sinPrecio === 1 ? "" : "es"} con algún producto sin precio: el monto real puede ser mayor.</p>` : ""}
+    </div>` : ""}
     <div class="card">
       <strong>Proveedor:</strong> ${esc(data.proveedor)}
     </div>
@@ -480,9 +512,10 @@ async function vistaResumen() {
       <h4 style="margin-top:0">Consumo del convenio</h4>
       <div class="charts">
         <div class="donut-wrap">
-          ${svgDonut(pct)}
+          ${svgDonut(verProyeccion ? pctFact : pct, verProyeccion ? pctSol : 0)}
           <div class="legend">
-            <span><i style="background:var(--gold)"></i>Comprometido</span>
+            <span><i style="background:var(--gold)"></i>${verProyeccion ? "Facturado (real)" : "Comprometido"}</span>
+            ${verProyeccion ? `<span><i style="background:var(--gold-tint);border:1px solid var(--gold)"></i>Solicitado (estimado)</span>` : ""}
             <span><i style="background:var(--surface-2);border:1px solid var(--border)"></i>Saldo</span>
           </div>
         </div>
@@ -504,17 +537,22 @@ async function vistaResumen() {
 }
 
 // ---------- Gráficos del Resumen (con datos reales de Supabase) ----------
-function svgDonut(pct) {
+// pct = tramo facturado (real); pctExtra = tramo solicitado (estimado), a continuación.
+function svgDonut(pct, pctExtra = 0) {
   const r = 54, c = 2 * Math.PI * r;
-  const dash = Math.max(0, Math.min(100, pct)) / 100 * c;
+  const tramo = (p) => Math.max(0, Math.min(100, p)) / 100 * c;
+  const dash = tramo(pct), dashExtra = Math.min(tramo(pctExtra), c - dash);
+  const total = Math.round((pct + pctExtra) * 10) / 10;
   return `
-    <div class="donut" title="${pct}% del convenio comprometido">
-      <svg width="140" height="140" viewBox="0 0 140 140" aria-label="${pct}% del convenio usado">
+    <div class="donut" title="${total}% del convenio usado">
+      <svg width="140" height="140" viewBox="0 0 140 140" aria-label="${total}% del convenio usado">
         <circle cx="70" cy="70" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="16"/>
+        ${dashExtra > 0 ? `<circle cx="70" cy="70" r="${r}" fill="none" stroke="var(--gold-tint)" stroke-width="16"
+                stroke-dasharray="${dashExtra.toFixed(1)} ${c.toFixed(1)}" stroke-dashoffset="${(-dash).toFixed(1)}"/>` : ""}
         <circle cx="70" cy="70" r="${r}" fill="none" stroke="var(--gold)" stroke-width="16"
                 stroke-linecap="round" stroke-dasharray="${dash.toFixed(1)} ${c.toFixed(1)}"/>
       </svg>
-      <div class="center"><b>${pct}%</b><small>usado</small></div>
+      <div class="center"><b>${total}%</b><small>usado</small></div>
     </div>
   `;
 }
