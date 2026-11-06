@@ -464,11 +464,11 @@ async function vistaResumen() {
       .order("id")),
   ]);
 
-  // Lo solicitado que aún no tiene factura se descuenta del saldo desde que se
-  // ingresa la solicitud, con su monto estimado (precio de cada producto + IVA);
+  // Lo solicitado que aún no tiene factura se descuenta del saldo desde que el
+  // Director la aprueba, con su monto estimado (precio de cada producto + IVA);
   // cuando se registra la factura, el valor real ("comprometido") la reemplaza
   // (la solicitud pasa a "facturada" y ya no se cuenta como solicitada). Las
-  // rechazadas devuelven su monto.
+  // pendientes, visadas y rechazadas no se suman.
   // Solo lo calculan los roles que ven todas las solicitudes.
   const verProyeccion = ["admin", "admin_ito", "lector_operativo", "lector_pagos", "lector_ejecutivo"].includes(rolEfectivo());
   const tope = Number(data.tope_anual) || 0;
@@ -478,7 +478,7 @@ async function vistaResumen() {
     (solicitudes || []).forEach(s => {
       const det = s.solicitud_detalle || [];
       const t = totalesDetalle(det);
-      if (["pendiente", "visada", "aprobada", "enviada", "recibida"].includes(s.estado)) {
+      if (["aprobada", "enviada", "recibida"].includes(s.estado)) {
         solicitado += t.bruto;
         nSolicitadas++;
         if (!det.length || t.sinValor) sinPrecio++;
