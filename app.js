@@ -463,7 +463,7 @@ async function vistaResumen() {
   }
   // Gráficos: si fallan (falta alguna tabla/permiso) el resumen igual se ve.
   const [{ data: facturas }, { data: solicitudes }] = await Promise.all([
-    sb.from("factura").select("monto_bruto, solicitud(unidad(nombre))"),
+    sb.from("factura").select("monto_bruto, solicitud(unidad(nombre))").or("anulado.is.null,anulado.eq.false"),
     cargarTodas(() => sb.from("solicitud")
       .select("id, estado, creado_en, unidad(nombre), solicitud_detalle(cantidad_solicitada, precio_unitario_neto, articulo(precio_neto))")
       .order("id")),
@@ -1626,14 +1626,14 @@ async function vistaExpedientes(filtroUnidad) {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
   const [{ data: solsTodas, error }, { data: guias }, { data: facturas }] = await Promise.all([
     cargarTodas(() => sb.from("solicitud").select("*, unidad(nombre)").order("creado_en", { ascending: false }).order("id")),
-    cargarTodas(() => sb.from("guia_despacho").select("solicitud_id, monto_bruto").order("id")),
-    cargarTodas(() => sb.from("factura").select("solicitud_id, monto_bruto").order("id")),
+    cargarTodas(() => sb.from("guia_despacho").select("solicitud_id, monto_bruto, anulado").order("id")),
+    cargarTodas(() => sb.from("factura").select("solicitud_id, monto_bruto, anulado").order("id")),
   ]);
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
   const sols = filtroUnidad ? (solsTodas || []).filter(s => s.unidad?.nombre === filtroUnidad) : solsTodas;
 
-  const cuenta = (arr, id) => (arr || []).filter(x => x.solicitud_id === id);
+  const cuenta = (arr, id) => (arr || []).filter(x => x.solicitud_id === id && !x.anulado);
   vista().innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">Expedientes de solicitudes</h3>
@@ -1716,9 +1716,10 @@ async function vistaExpediente(id) {
 
   window._expActual = { s, detalle: detalle || [] };
   const opero = puedeOperar();
-  const facturasAnuladas = (facturas || []).filter(f => f.anulado);
   const factura = (facturas || []).find(f => !f.anulado) || null;
   const facturaDescontada = factura && (comprasSol || []).some(c => c.n_oc === "FACT " + factura.numero);
+  // Las guías anuladas no se muestran: quedan registradas en la bitácora.
+  const guiasVisibles = (guias || []).filter(g => !g.anulado);
   // Los totales de guías ignoran las anuladas (no cuentan para la factura ni el convenio).
   const sumaGuias = (guias || []).filter(g => !g.anulado).reduce((a, g) => ({
     neto: a.neto + Number(g.monto_neto || 0),
@@ -1830,21 +1831,19 @@ async function vistaExpediente(id) {
 
     <!-- GUÍAS DE DESPACHO -->
     <div class="card">
-      <div class="exp-seccion"><h4>Guías de despacho</h4><span class="hint">${(guias || []).length} registrada(s)</span></div>
-      ${(guias || []).length ? `
+      <div class="exp-seccion"><h4>Guías de despacho</h4><span class="hint">${guiasVisibles.length} registrada(s)</span></div>
+      ${guiasVisibles.length ? `
         <table>
           <tr><th>N°</th><th>Fecha</th><th>Ingreso</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th><th></th></tr>
-          ${guias.map(g => `<tr${g.anulado ? ' class="fila-anulada"' : ''}>
-            <td>${esc(g.numero)}${g.anulado ? ' <span class="pill anulada">anulada</span>' : ''}</td>
+          ${guiasVisibles.map(g => `<tr>
+            <td>${esc(g.numero)}</td>
             <td>${g.fecha || ""}</td>
             <td>${g.fecha_ingreso || ""}</td>
             <td class="num">${money(g.monto_neto)}</td>
             <td class="num">${money(g.iva)}</td>
             <td class="num">${money(g.monto_bruto)}</td>
             <td>${g.archivo_url ? `${enlaceArchivo(g.archivo_url, `ver`)}` : "—"}</td>
-            <td>${g.anulado
-                  ? `<span class="hint" title="${esc(g.anulado_motivo)}">motivo ⓘ</span>`
-                  : (opero ? `<button class="secundario" onclick="anularGuia('${g.id}','${s.id}')">Anular</button>` : "")}</td>
+            <td>${opero ? `<button class="secundario" onclick="anularGuia('${g.id}','${s.id}')">Anular</button>` : ""}</td>
           </tr>`).join("")}
           <tr>
             <td colspan="3" style="text-align:right;font-weight:700">Totales</td>
@@ -1882,18 +1881,6 @@ async function vistaExpediente(id) {
     <!-- FACTURA -->
     <div class="card">
       <div class="exp-seccion"><h4>Factura</h4>${factura ? `<span class="pill facturada">registrada</span>` : `<span class="hint">pendiente</span>`}</div>
-      ${facturasAnuladas.length ? `
-        <table>
-          <tr><th>Factura anulada</th><th>Fecha</th><th class="num">Bruto</th><th>Motivo</th><th>Anuló</th></tr>
-          ${facturasAnuladas.map(f => `<tr class="fila-anulada">
-            <td>${esc(f.numero)}</td>
-            <td>${f.fecha || ""}</td>
-            <td class="num">${money(f.monto_bruto)}</td>
-            <td>${esc(f.anulado_motivo) || "—"}</td>
-            <td>${_fechaHora(f.anulado_en)}</td>
-          </tr>`).join("")}
-        </table>
-      ` : ""}
       ${factura && editarFacturaId !== factura.id ? `
         <div class="exp-datos">
           <div><div class="d-k">N° factura</div>${esc(factura.numero) || "—"}</div>
@@ -2487,7 +2474,8 @@ async function anularGuia(id, solicitudId) {
 
 // ---------- Notas de crédito (corrigen una factura ya emitida) ----------
 function bloqueNotasCredito(s, factura, notas, opero) {
-  const totalNC = (notas || []).filter(n => !n.anulado).reduce((a, n) => a + Number(n.monto_bruto || 0), 0);
+  notas = (notas || []).filter(n => !n.anulado);   // las anuladas quedan en la bitácora
+  const totalNC = (notas || []).reduce((a, n) => a + Number(n.monto_bruto || 0), 0);
   return `
     <div class="card">
       <div class="exp-seccion"><h4>Notas de crédito</h4><span class="hint">${(notas || []).length} registrada(s)</span></div>
@@ -2495,17 +2483,15 @@ function bloqueNotasCredito(s, factura, notas, opero) {
       ${(notas || []).length ? `
         <table>
           <tr><th>N°</th><th>Fecha</th><th>Motivo</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Bruto</th><th>Adjunto</th><th></th></tr>
-          ${notas.map(n => `<tr${n.anulado ? ' class="fila-anulada"' : ''}>
-            <td>${esc(n.numero)}${n.anulado ? ' <span class="pill anulada">anulada</span>' : ''}</td>
+          ${notas.map(n => `<tr>
+            <td>${esc(n.numero)}</td>
             <td>${n.fecha || ""}</td>
             <td>${esc(n.motivo)}</td>
             <td class="num">${money(n.monto_neto)}</td>
             <td class="num">${money(n.iva)}</td>
             <td class="num">${money(n.monto_bruto)}</td>
             <td>${n.archivo_url ? `${enlaceArchivo(n.archivo_url, `ver`)}` : "—"}</td>
-            <td>${n.anulado
-                  ? `<span class="hint" title="${esc(n.anulado_motivo)}">motivo ⓘ</span>`
-                  : (opero ? `<button class="secundario" onclick="anularNotaCredito('${n.id}','${s.id}')">Anular</button>` : "")}</td>
+            <td>${opero ? `<button class="secundario" onclick="anularNotaCredito('${n.id}','${s.id}')">Anular</button>` : ""}</td>
           </tr>`).join("")}
         </table>
         <div class="totales">
