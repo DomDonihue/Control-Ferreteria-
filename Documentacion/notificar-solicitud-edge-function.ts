@@ -153,20 +153,32 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Devuelta para corregir: avisa a los usuarios de Obras de esa dirección.
-    if (type === "UPDATE" && record?.estado === "devuelta" && old_record?.estado !== "devuelta") {
-      const { data: perfiles } = await supabase.from("perfiles").select("id")
-        .eq("rol", "solicitante_obras").eq("unidad_id", record.unidad_id);
-      const emails: string[] = [];
-      for (const p of perfiles || []) {
-        const { data } = await supabase.auth.admin.getUserById(p.id);
-        if (data?.user?.email) emails.push(data.user.email);
+    // Devuelta para corregir: vuelve a la persona anterior del recorrido.
+    //   devuelta_a = 'ito'         -> la devolvió el Director: avisa al ITO.
+    //   devuelta_a = 'solicitante' -> la devolvió el ITO: avisa a los usuarios de Obras de esa dirección.
+    if (type === "UPDATE" && record?.estado === "devuelta" &&
+        (old_record?.estado !== "devuelta" || old_record?.devuelta_a !== record?.devuelta_a)) {
+      const motivo = record?.motivo_devolucion || "—";
+      if (record?.devuelta_a === "ito") {
+        await enviarCorreo(
+          await emailsPorRol("admin_ito"),
+          `Solicitud devuelta por el Director — N° ${numero}`,
+          mensaje("Hola,", `El Director devolvió esta solicitud para que la corrijas o la pases al solicitante. Motivo: ${motivo}`, record, numero),
+        );
+      } else {
+        const { data: perfiles } = await supabase.from("perfiles").select("id")
+          .eq("rol", "solicitante_obras").eq("unidad_id", record.unidad_id);
+        const emails: string[] = [];
+        for (const p of perfiles || []) {
+          const { data } = await supabase.auth.admin.getUserById(p.id);
+          if (data?.user?.email) emails.push(data.user.email);
+        }
+        await enviarCorreo(
+          emails,
+          `Solicitud devuelta para corregir — N° ${numero}`,
+          mensaje("Hola,", `Tu solicitud fue devuelta para que la corrijas y la reenvíes. Motivo: ${motivo}`, record, numero),
+        );
       }
-      await enviarCorreo(
-        emails,
-        `Solicitud devuelta para corregir — N° ${numero}`,
-        mensaje("Hola,", `Tu solicitud fue devuelta para que la corrijas y la reenvíes. Motivo: ${record?.motivo_devolucion || "—"}`, record, numero),
-      );
     }
 
     if (type === "UPDATE" && record?.estado === "aprobada" && old_record?.estado !== "aprobada") {

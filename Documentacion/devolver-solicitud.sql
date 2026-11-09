@@ -3,15 +3,18 @@
 -- =====================================================================
 --
 -- Solicitudes de la Dirección de Obras (tipo 'operaciones'), ANTES de que el
--- Director las apruebe:
+-- Director las apruebe. Al devolver, la solicitud vuelve a la PERSONA ANTERIOR
+-- del recorrido (estado 'devuelta' + columna devuelta_a):
 --
---   ITO (pendiente o visada)  --devolver con motivo-->  devuelta
---   Director (visada)         --devolver con motivo-->  devuelta
+--   Director (visada)  --devolver-->  vuelve al ITO          (devuelta_a = 'ito')
+--   ITO (pendiente o visada) --devolver-->  vuelve a quien la hizo
+--                                                           (devuelta_a = 'solicitante')
 --
---   En 'devuelta' el solicitante la edita (cantidades, productos, datos) y
---   la reenvía:
+--   Quien la recibe la corrige (cantidades, productos, datos) y la reenvía:
 --     usuario de Obras  -> vuelve a 'pendiente' (el ITO la revisa de nuevo)
---     ITO / Admin       -> queda 'visada' (no se revisa a sí mismo)
+--     ITO / Admin       -> queda 'visada' (pasa al Director; no se revisa a sí mismo)
+--   El ITO que recibió una devolución del Director también puede, en vez de
+--   corregirla él, devolverla al solicitante (con su propio motivo).
 --
 -- No se pueden devolver las ya aprobadas, ni las que nacen de una cotización
 -- de Obras (sus productos y precios vienen de las 3 cotizaciones).
@@ -20,7 +23,8 @@
 -- que validan rol, estado y pertenencia, y cambian los productos y el estado
 -- en una sola transacción. No se abre ninguna política nueva de escritura.
 --
--- Es idempotente. Correr UNA vez en el SQL Editor de Supabase.
+-- Es idempotente: se puede volver a correr (si ya habías corrido la versión
+-- anterior, correr esta la actualiza). Correr en el SQL Editor de Supabase.
 -- Requiere haber corrido antes: flujo-solicitante-obras.sql, motivo-rechazo.sql
 -- y bitacora-solicitudes.sql.
 -- =====================================================================
@@ -36,6 +40,11 @@ alter table solicitud add constraint solicitud_estado_check
 alter table solicitud add column if not exists motivo_devolucion text;
 alter table solicitud add column if not exists devuelto_por uuid references perfiles(id);
 alter table solicitud add column if not exists devuelto_en  timestamptz;
+alter table solicitud add column if not exists devuelta_a   text;
+
+alter table solicitud drop constraint if exists solicitud_devuelta_a_check;
+alter table solicitud add constraint solicitud_devuelta_a_check
+  check (devuelta_a is null or devuelta_a in ('ito','solicitante'));
 
 -- 2) Orden del flujo (vale para todos, incluso por API) -------------------
 create or replace function public.fn_validar_flujo_operaciones()
@@ -59,6 +68,9 @@ begin
       if not (old.estado in ('pendiente','visada') and v_rol in ('admin','admin_ito','lector_operativo')) then
         raise exception 'Solo el ITO o el Director pueden devolver una solicitud que aún no está aprobada.';
       end if;
+      if v_rol = 'lector_operativo' and old.estado <> 'visada' then
+        raise exception 'El Director solo devuelve las solicitudes que el ITO ya visó.';
+      end if;
       if coalesce(btrim(new.motivo_devolucion), '') = '' then
         raise exception 'La devolución necesita un motivo.';
       end if;
@@ -66,6 +78,11 @@ begin
       new.visado_en    := null;
       new.devuelto_por := coalesce(new.devuelto_por, auth.uid());
       new.devuelto_en  := coalesce(new.devuelto_en, now());
+      -- vuelve a la persona anterior: Director -> ITO; ITO -> solicitante
+      new.devuelta_a := case when v_rol = 'lector_operativo' then 'ito'
+                             when v_rol = 'admin_ito' then 'solicitante'
+                             when old.estado = 'visada' then 'ito'
+                             else 'solicitante' end;
     end if;
 
     -- Desde 'devuelta' solo se reenvía: a 'pendiente' (Obras) o 'visada' (ITO).
@@ -76,10 +93,15 @@ begin
        and not (v_rol in ('solicitante_obras','admin','admin_ito')) then
       raise exception 'Solo quien hizo la solicitud puede corregirla y reenviarla.';
     end if;
+    if old.estado = 'devuelta' and new.estado = 'pendiente' and v_rol = 'solicitante_obras'
+       and coalesce(old.devuelta_a, 'solicitante') <> 'solicitante' then
+      raise exception 'La solicitud está en manos del ITO.';
+    end if;
     -- Al reenviarla se limpia el motivo: la próxima devolución exige el suyo
     -- (el anterior queda en la bitácora).
     if old.estado = 'devuelta' then
       new.motivo_devolucion := null;
+      new.devuelta_a := null;
     end if;
   end if;
   return new;
@@ -91,11 +113,14 @@ create trigger trg_validar_flujo_operaciones
   for each row execute function public.fn_validar_flujo_operaciones();
 
 -- 3) Devolver ------------------------------------------------------------
-create or replace function public.devolver_solicitud(p_id uuid, p_motivo text)
-returns void language plpgsql security definer set search_path = public as $$
+-- Devuelve a quién queda: 'ito' o 'solicitante'.
+drop function if exists public.devolver_solicitud(uuid, text);
+create function public.devolver_solicitud(p_id uuid, p_motivo text)
+returns text language plpgsql security definer set search_path = public as $$
 declare
   v_rol text := public.rol_actual();
   s solicitud%rowtype;
+  v_a  text;
 begin
   if v_rol not in ('admin','admin_ito','lector_operativo') then
     raise exception 'Sin permiso para devolver solicitudes';
@@ -112,14 +137,26 @@ begin
   if (to_jsonb(s)->>'proceso_cotizacion_id') is not null then
     raise exception 'Esta solicitud nace de una cotización: no se edita, se rechaza si hay que rehacerla.';
   end if;
-  if s.estado not in ('pendiente','visada') then
+
+  -- El ITO también puede pasar al solicitante lo que el Director le devolvió.
+  if not (s.estado in ('pendiente','visada')
+          or (s.estado = 'devuelta' and s.devuelta_a = 'ito' and v_rol in ('admin','admin_ito'))) then
     raise exception 'Solo se puede devolver antes de la aprobación (estado actual: %).', s.estado;
   end if;
+  if v_rol = 'lector_operativo' and s.estado <> 'visada' then
+    raise exception 'El Director solo devuelve las solicitudes que el ITO ya visó.';
+  end if;
+
+  v_a := case when v_rol = 'lector_operativo' then 'ito'
+              when v_rol = 'admin_ito' then 'solicitante'
+              when s.estado = 'visada' then 'ito'
+              else 'solicitante' end;
 
   update solicitud
      set estado = 'devuelta', motivo_devolucion = btrim(p_motivo),
-         devuelto_por = auth.uid(), devuelto_en = now()
+         devuelto_por = auth.uid(), devuelto_en = now(), devuelta_a = v_a
    where id = p_id;
+  return v_a;
 end $$;
 
 -- 4) Corregir y reenviar ---------------------------------------------------
@@ -147,6 +184,9 @@ begin
   end if;
   if v_rol = 'solicitante_obras' and s.unidad_id is distinct from public.unidad_del_usuario() then
     raise exception 'La solicitud no es de tu dirección.';
+  end if;
+  if v_rol = 'solicitante_obras' and coalesce(s.devuelta_a, 'solicitante') <> 'solicitante' then
+    raise exception 'La solicitud está en manos del ITO.';
   end if;
 
   if coalesce(btrim(p_unidad_interna),'') = '' or coalesce(btrim(p_solicitante),'') = ''
@@ -188,7 +228,7 @@ revoke all on function public.reenviar_solicitud(uuid, text, text, text, text, j
 grant execute on function public.devolver_solicitud(uuid, text) to authenticated;
 grant execute on function public.reenviar_solicitud(uuid, text, text, text, text, jsonb) to authenticated;
 
--- 5) Bitácora: la devolución queda con su motivo ---------------------------
+-- 5) Bitácora: la devolución queda con su motivo y a quién volvió ----------
 create or replace function public.fn_bitacora_solicitud()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -197,14 +237,16 @@ begin
     values (auth.uid(), public._actor_nombre(), 'solicitud', new.id, new.id, 'crear',
             jsonb_build_object('n', to_jsonb(new)->>'correlativo', 'tipo', new.tipo, 'estado', new.estado));
 
-  elsif tg_op = 'UPDATE' and new.estado is distinct from old.estado then
+  elsif tg_op = 'UPDATE' and (new.estado is distinct from old.estado
+        or (new.estado = 'devuelta' and new.devuelta_a is distinct from old.devuelta_a)) then
     insert into bitacora(actor_id, actor_nombre, entidad, entidad_id, solicitud_id, accion, motivo, detalle)
     values (auth.uid(), public._actor_nombre(), 'solicitud', new.id, new.id, 'cambiar_estado',
             case new.estado
               when 'rechazada' then to_jsonb(new)->>'motivo_rechazo'
               when 'devuelta'  then to_jsonb(new)->>'motivo_devolucion'
             end,
-            jsonb_build_object('de', old.estado, 'a', new.estado, 'n', to_jsonb(new)->>'correlativo'));
+            jsonb_build_object('de', old.estado, 'a', new.estado, 'n', to_jsonb(new)->>'correlativo',
+                               'devuelta_a', to_jsonb(new)->>'devuelta_a'));
   end if;
   return null;
 end $$;
@@ -214,9 +256,9 @@ commit;
 -- =====================================================================
 -- PRUEBA
 --   1. Como usuario de Obras: ingresa una Solicitud Obras (queda pendiente).
---   2. Como ITO: en Solicitudes pulsa "Devolver", escribe el motivo.
---      -> pasa a 'devuelta' y la ve el solicitante con el motivo.
---   3. Como usuario de Obras: "Corregir y reenviar", cambia una cantidad,
---      agrega un producto, guarda -> vuelve a 'pendiente'.
---   4. Como ITO: dale el V°B°; como Director: prueba también "Devolver".
+--   2. Como ITO: "Devolver" con motivo -> vuelve al SOLICITANTE (devuelta).
+--   3. Como usuario de Obras: "Corregir y reenviar" -> vuelve a 'pendiente'.
+--   4. ITO: V°B° -> visada. Como Director: "Devolver" -> vuelve al ITO.
+--   5. Como ITO: "Corregir y reenviar" (queda visada) o "Devolver" para pasarla
+--      al solicitante.
 -- =====================================================================

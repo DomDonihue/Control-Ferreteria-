@@ -186,12 +186,16 @@ async function actualizarNotificaciones() {
       const { count: porRevisar } = await sb.from("solicitud").select("id", { count: "exact", head: true })
         .eq("estado", "pendiente").eq("tipo", "operaciones");
       if (porRevisar) partes.push({ n: porRevisar, texto: `${porRevisar} solicitud${porRevisar === 1 ? "" : "es"} de Obras por revisar`, ir: "solicitudes" });
+      const { count: delDirector } = await sb.from("solicitud").select("id", { count: "exact", head: true })
+        .eq("estado", "devuelta").eq("devuelta_a", "ito");
+      if (delDirector) partes.push({ n: delDirector, texto: `${delDirector} solicitud${delDirector === 1 ? "" : "es"} devuelta${delDirector === 1 ? "" : "s"} por el Director`, ir: "solicitudes" });
       const { count: porEmitir } = await sb.from("proceso_cotizacion").select("id", { count: "exact", head: true }).eq("estado", "borrador");
       if (porEmitir) partes.push({ n: porEmitir, texto: `${porEmitir} solicitud${porEmitir === 1 ? "" : "es"} de cotización por emitir`, ir: "procesos" });
     }
     if (rol === "solicitante_obras") {
       // Las devueltas de su dirección esperan su corrección (la política de lectura ya las limita).
-      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "devuelta");
+      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true })
+        .eq("estado", "devuelta").or("devuelta_a.is.null,devuelta_a.eq.solicitante");
       if (count) partes.push({ n: count, texto: `${count} solicitud${count === 1 ? "" : "es"} devuelta${count === 1 ? "" : "s"} para corregir`, ir: "solicitudes" });
     }
     if (["admin", "admin_ito"].includes(rol)) {
@@ -1511,7 +1515,7 @@ async function vistaSolicitudes() {
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             ${verMonto ? `<td class="num">${celdaMonto(s)}</td>` : ""}
-            <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}${s.estado === "devuelta" && s.motivo_devolucion ? `<div class="hint">Devuelta: ${esc(s.motivo_devolucion)}</div>` : ""}</td>
+            <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}${s.estado === "devuelta" && s.motivo_devolucion ? `<div class="hint">Devuelta${s.devuelta_a === "ito" ? " al ITO" : ""}: ${esc(s.motivo_devolucion)}</div>` : ""}</td>
             <td>${accionesSolicitud(s)}</td>
           </tr>`);
   listaPintar("sol");
@@ -1535,8 +1539,12 @@ function botonesDecision(s) {
   if (puedeOperar() && devolvible && s.estado === "visada") {
     return btn("Devolver", "devuelta");
   }
-  if (s.estado === "devuelta" && devolvible && (puedeOperar() || rolEfectivo() === "solicitante_obras")) {
-    return `<button class="primario" onclick="editarSolicitudDevuelta('${s.id}')">Corregir y reenviar</button>`;
+  if (s.estado === "devuelta" && devolvible) {
+    const corregir = `<button class="primario" onclick="editarSolicitudDevuelta('${s.id}')">Corregir y reenviar</button>`;
+    // Devuelta por el Director: la tiene el ITO (puede corregirla o pasarla al solicitante).
+    if (s.devuelta_a === "ito" && puedeOperar()) return `${corregir} ${btn("Devolver al solicitante", "devuelta")}`;
+    // Devuelta por el ITO: la tiene quien hizo la solicitud (o el ITO por él).
+    if (s.devuelta_a !== "ito" && (puedeOperar() || rolEfectivo() === "solicitante_obras")) return corregir;
   }
   return "";
 }
@@ -1548,7 +1556,7 @@ function accionesSolicitud(s) {
   const decision = botonesDecision(s);
   if (decision) return `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver</button> ${decision}`;
   const espera = s.tipo === "operaciones" && s.estado === "pendiente" ? `<div class="hint">En revisión del ITO</div>`
-    : s.estado === "devuelta" ? `<div class="hint">Devuelta para corrección</div>` : "";
+    : s.estado === "devuelta" ? `<div class="hint">Devuelta ${s.devuelta_a === "ito" ? "al ITO" : "al solicitante"} para corrección</div>` : "";
   return `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver expediente</button>${espera}`;
 }
 
@@ -1557,7 +1565,7 @@ function editarSolicitudDevuelta(id) { vistaNuevaSolicitudOperaciones(id); }
 async function resolverSolicitud(id, estado, etapa) {
   // Devolver: vuelve a quien la hizo para que corrija cantidades o productos.
   if (estado === "devuelta") {
-    const motivo = await confirmar({ titulo: "Devolver la solicitud", texto: "Vuelve a quien la hizo para que la corrija (cantidades, productos, datos) y la reenvíe. El motivo es obligatorio.", boton: "Devolver", motivo: true });
+    const motivo = await confirmar({ titulo: "Devolver la solicitud", texto: "Vuelve a la persona anterior del recorrido: si la devuelve el Director, al ITO; si la devuelve el ITO, a quien hizo la solicitud. Corrige cantidades, productos o datos y la reenvía. El motivo es obligatorio.", boton: "Devolver", motivo: true });
     if (!motivo) return;
     const { error: errDev } = await sb.rpc("devolver_solicitud", { p_id: id, p_motivo: motivo });
     if (errDev) { alert("No se pudo devolver la solicitud: " + errDev.message); return; }
@@ -1799,7 +1807,7 @@ async function vistaExpediente(id) {
         const decision = botonesDecision(s);
         return decision ? `<div class="exp-seccion" style="margin-top:1.2rem"><h4>Decisión</h4></div>
           <div class="acciones-decision">${decision}</div>
-          <p class="hint" style="margin-top:.4rem">Revisa los materiales y decide aquí mismo. <strong>Devolver</strong> la manda de vuelta para corregir cantidades o productos; <strong>Rechazar</strong> la cierra.</p>` : "";
+          <p class="hint" style="margin-top:.4rem">Revisa los materiales y decide aquí mismo. <strong>Devolver</strong> la manda a la persona anterior (el Director al ITO, el ITO a quien hizo la solicitud) para corregir cantidades o productos; <strong>Rechazar</strong> la cierra.</p>` : "";
       })()}
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Respaldos y situaciones especiales</h4></div>
@@ -1974,6 +1982,7 @@ function _filaBitacora(r) {
   const d = r.detalle || {};
   let cambio = "";
   if (r.accion === "cambiar_estado" && d.de && d.a) cambio = `${d.de} → ${d.a}`;
+  else if (r.accion === "cambiar_estado" && d.a === "devuelta") cambio = `${d.de} → devuelta al ${d.devuelta_a === "ito" ? "ITO" : "solicitante"}`;
   else if (r.accion === "crear" && r.entidad === "solicitud") cambio = `ingresó${d.n ? " N° " + d.n : ""}${{ operaciones: " (Solicitud Obras)", especial: " (fuera de catálogo)" }[d.tipo] || ""}`;
   const texto = [cambio, r.motivo ? `Motivo: ${r.motivo}` : ""].filter(Boolean).join(" · ");
   return `<tr>
