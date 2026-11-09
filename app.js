@@ -1517,29 +1517,36 @@ async function vistaSolicitudes() {
   listaPintar("sol");
 }
 
-// Botones de cada fila según rol y etapa:
-//  - tipo "operaciones" y pendiente  -> revisa el ITO (V°B° o rechazo)
-//  - visada, o pendiente de otro tipo -> decide el Director (aprobar o rechazar)
-function accionesSolicitud(s) {
+// Botones de decisión de una solicitud según rol y estado (vacío si no corresponde).
+// Los usan la lista de Solicitudes y la propia solicitud (Ver).
+function botonesDecision(s) {
   const btn = (txt, estado, etapa) =>
     `<button class="secundario" onclick="resolverSolicitud('${s.id}','${estado}'${etapa ? `,'${etapa}'` : ""})">${txt}</button>`;
-  const ver = `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver</button>`;
   // Se pueden devolver, antes de la aprobación, las solicitudes de Obras hechas
   // con el formulario (las que nacen de una cotización no se editan).
   const devolvible = s.tipo === "operaciones" && !s.proceso_cotizacion_id;
 
   if (puedeOperar() && s.tipo === "operaciones" && s.estado === "pendiente") {
-    return `${ver} ${btn("Dar V°B°", "visada", "ito")} ${devolvible ? btn("Devolver", "devuelta") : ""} ${btn("Rechazar", "rechazada", "ito")}`;
+    return `${btn("Dar V°B°", "visada", "ito")} ${devolvible ? btn("Devolver", "devuelta") : ""} ${btn("Rechazar", "rechazada", "ito")}`;
   }
   if (esDirector() && (s.estado === "visada" || (s.estado === "pendiente" && s.tipo !== "operaciones"))) {
-    return `${ver} ${btn("Aprobar", "aprobada")} ${s.estado === "visada" && devolvible ? btn("Devolver", "devuelta") : ""} ${btn("Rechazar", "rechazada")}`;
+    return `${btn("Aprobar", "aprobada")} ${s.estado === "visada" && devolvible ? btn("Devolver", "devuelta") : ""} ${btn("Rechazar", "rechazada")}`;
   }
   if (puedeOperar() && devolvible && s.estado === "visada") {
-    return `${ver} ${btn("Devolver", "devuelta")}`;
+    return btn("Devolver", "devuelta");
   }
   if (s.estado === "devuelta" && devolvible && (puedeOperar() || rolEfectivo() === "solicitante_obras")) {
-    return `${ver} <button class="primario" onclick="editarSolicitudDevuelta('${s.id}')">Corregir y reenviar</button>`;
+    return `<button class="primario" onclick="editarSolicitudDevuelta('${s.id}')">Corregir y reenviar</button>`;
   }
+  return "";
+}
+
+// Botones de cada fila según rol y etapa:
+//  - tipo "operaciones" y pendiente  -> revisa el ITO (V°B°, devolver o rechazo)
+//  - visada, o pendiente de otro tipo -> decide el Director (aprobar, devolver o rechazar)
+function accionesSolicitud(s) {
+  const decision = botonesDecision(s);
+  if (decision) return `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver</button> ${decision}`;
   const espera = s.tipo === "operaciones" && s.estado === "pendiente" ? `<div class="hint">En revisión del ITO</div>`
     : s.estado === "devuelta" ? `<div class="hint">Devuelta para corrección</div>` : "";
   return `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver expediente</button>${espera}`;
@@ -1786,6 +1793,13 @@ async function vistaExpediente(id) {
           <tr><td colspan="4" style="text-align:right;font-weight:700">Total estimado</td><td class="num" style="font-weight:700">${money(tot.bruto)}</td></tr>` : ""}
       </table>
       ${conValor ? `<p class="hint" style="margin-top:.4rem">Valores netos según el listado de precios del contrato. Es un monto estimado: el valor final se verifica con la guía de despacho y la factura.${tot.sinValor ? ` ${tot.sinValor} línea(s) sin valor no están incluidas en el total.` : ""}</p>` : ""}`;
+      })()}
+
+      ${(() => {
+        const decision = botonesDecision(s);
+        return decision ? `<div class="exp-seccion" style="margin-top:1.2rem"><h4>Decisión</h4></div>
+          <div class="acciones-decision">${decision}</div>
+          <p class="hint" style="margin-top:.4rem">Revisa los materiales y decide aquí mismo. <strong>Devolver</strong> la manda de vuelta para corregir cantidades o productos; <strong>Rechazar</strong> la cierra.</p>` : "";
       })()}
 
       <div class="exp-seccion" style="margin-top:1.2rem"><h4>Respaldos y situaciones especiales</h4></div>
