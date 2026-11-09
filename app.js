@@ -534,7 +534,7 @@ async function vistaResumen() {
             <span><i style="background:var(--surface-2);border:1px solid var(--border)"></i>Saldo</span>
           </div>
         </div>
-        ${htmlBarrasPorUnidad(facturas || [], solicitudes || [], Number(data.tope_anual) || 0)}
+        ${htmlBarrasPorUnidad(facturas || [], solicitudes || [], Number(data.tope_anual) || 0, verProyeccion)}
       </div>
     </div>
 
@@ -572,30 +572,39 @@ function svgDonut(pct, pctExtra = 0) {
   `;
 }
 
-function htmlBarrasPorUnidad(facturas, solicitudes, topeAnual) {
+// Por unidad: comprometido (facturado, real) y solicitado (aprobado sin factura,
+// estimado). Solo los roles que ven todas las solicitudes calculan lo solicitado.
+function htmlBarrasPorUnidad(facturas, solicitudes, topeAnual, conSolicitado) {
   const porUnidad = {};
-  const fila = (nombre) => (porUnidad[nombre] = porUnidad[nombre] || { monto: 0, solicitudes: 0 });
+  const fila = (nombre) => (porUnidad[nombre] = porUnidad[nombre] || { comprometido: 0, solicitado: 0, solicitudes: 0 });
 
-  facturas.forEach(f => { fila(f.solicitud?.unidad?.nombre || "Sin unidad").monto += Number(f.monto_bruto || 0); });
-  solicitudes.forEach(s => { fila(s.unidad?.nombre || "Sin unidad").solicitudes += 1; });
+  facturas.forEach(f => { fila(f.solicitud?.unidad?.nombre || "Sin unidad").comprometido += Number(f.monto_bruto || 0); });
+  solicitudes.forEach(s => {
+    const f = fila(s.unidad?.nombre || "Sin unidad");
+    f.solicitudes += 1;
+    if (conSolicitado && ["aprobada", "enviada", "recibida"].includes(s.estado)) f.solicitado += totalesDetalle(s.solicitud_detalle || []).bruto;
+  });
 
-  const filas = Object.entries(porUnidad).sort((a, b) => b[1].monto - a[1].monto).slice(0, 8);
+  const total = (d) => d.comprometido + d.solicitado;
+  const filas = Object.entries(porUnidad).sort((a, b) => total(b[1]) - total(a[1])).slice(0, 8);
   if (!filas.length) return `<p class="hint">Todavía no hay solicitudes ni facturas para mostrar por unidad.</p>`;
-  const max = Math.max(...filas.map(([, d]) => d.monto), 1);
+  const max = Math.max(...filas.map(([, d]) => total(d)), 1);
+  const ancho = (v) => (v > 0 ? Math.max(2, v / max * 100) : 0);
 
   return `
     <div>
-      <p class="hint" style="margin-top:0">Gasto facturado y solicitudes por unidad — haz clic en una para ver sus expedientes</p>
+      <p class="hint" style="margin-top:0">${conSolicitado ? "Comprometido (facturado) y solicitado (estimado)" : "Gasto facturado"} y solicitudes por unidad — haz clic en una para ver sus expedientes</p>
       <div class="bars">
         ${filas.map(([nombre, d]) => {
-          const pct = topeAnual ? (d.monto / topeAnual * 100) : 0;
-          const tip = `${nombre}: ${d.solicitudes} solicitud${d.solicitudes === 1 ? "" : "es"} · ${money(d.monto)} facturado` +
+          const pct = topeAnual ? (total(d) / topeAnual * 100) : 0;
+          const tip = `${nombre}: ${d.solicitudes} solicitud${d.solicitudes === 1 ? "" : "es"} · ${money(d.comprometido)} comprometido (facturado)` +
+                      (conSolicitado ? ` · ${money(d.solicitado)} solicitado (estimado)` : "") +
                       (topeAnual ? ` · ${pct.toFixed(1)}% del tope anual` : "");
           return `
           <div class="bar bar-click" title="${esc(tip)}" data-unidad="${esc(nombre)}">
             <span class="b-label">${esc(nombre)} <span class="b-count">${d.solicitudes}</span></span>
-            <span class="b-track"><span class="b-fill" style="width:${Math.max(4, d.monto / max * 100)}%"></span></span>
-            <span class="b-val">${money(d.monto)}${topeAnual ? `<small> · ${pct.toFixed(1)}%</small>` : ""}</span>
+            <span class="b-track"><span class="b-fill${conSolicitado ? " b-fill-com" : ""}" style="width:${ancho(d.comprometido)}%"></span>${conSolicitado ? `<span class="b-fill b-fill-sol" style="width:${ancho(d.solicitado)}%"></span>` : ""}</span>
+            <span class="b-val">${money(total(d))}${topeAnual ? `<small> · ${pct.toFixed(1)}%</small>` : ""}${conSolicitado ? `<small class="b-det">comprometido ${money(d.comprometido)} · solicitado ${money(d.solicitado)}</small>` : ""}</span>
           </div>`;
         }).join("")}
       </div>

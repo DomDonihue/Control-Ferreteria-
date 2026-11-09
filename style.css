@@ -192,7 +192,7 @@ nav.tabs button.activo .nav-ico{ color:#fff; }
 .legend i{ display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:5px; vertical-align:middle; }
 
 .bars{ display:flex; flex-direction:column; gap:9px; }
-.bar{ display:grid; grid-template-columns:140px 1fr 110px; align-items:center; gap:10px; font-size:.8rem; padding:3px 6px; border-radius:8px; }
+.bar{ display:grid; grid-template-columns:140px 1fr 190px; align-items:center; gap:10px; font-size:.8rem; padding:3px 6px; border-radius:8px; }
 .bar .b-label{ color:var(--ink-soft); }
 .bar .b-count{
   display:inline-block; min-width:1.4em; padding:0 .35em; margin-left:.3em; border-radius:999px;
@@ -203,6 +203,10 @@ nav.tabs button.activo .nav-ico{ color:#fff; }
 .bar .b-fill{ height:100%; background:linear-gradient(90deg,var(--navy-2),var(--navy)); border-radius:6px 0 0 6px; }
 .bar .b-val{ text-align:right; font-variant-numeric:tabular-nums; color:var(--ink); font-weight:600; }
 .bar .b-val small{ color:var(--ink-soft); font-weight:600; }
+.bar .b-track{ display:flex; }
+.bar .b-fill-com{ background:var(--gold); border-radius:6px 0 0 6px; }
+.bar .b-fill-sol{ background:var(--gold-tint); border-radius:0 6px 6px 0; border-left:1px solid var(--gold); }
+.bar .b-val .b-det{ display:block; font-size:.68rem; font-weight:400; line-height:1.3; }
 .bar-click{ cursor:pointer; transition:background .15s; }
 .bar-click:hover{ background:var(--surface-2); }
 .bar-click:hover .b-fill{ filter:brightness(1.15); }
