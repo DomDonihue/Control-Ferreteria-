@@ -78,6 +78,12 @@ Las demás direcciones siguen con el procedimiento anterior.
 5. **Comparar:** el sistema muestra producto por producto el precio de cada proveedor, el total, cuál es el más conveniente y cuánto se aleja el proveedor del contrato de la mejor cotización externa. Queda como respaldo de que el precio es el más conveniente.
 6. **Crear la solicitud especial:** con las 3 cotizaciones completas aparece **Crear solicitud especial**. Nace una solicitud de Obras con esos productos y los precios del proveedor del contrato; sigue el recorrido normal (V°B° del ITO, aprobación del Director, hoja a la ferretería, guías y factura) y la factura se **descuenta del convenio**. En su expediente quedan las 3 cotizaciones.
 
+### Devolver una solicitud para corregirla (Dirección de Obras)
+Antes de que el Director la apruebe, el **ITO** (solicitud pendiente o visada) o el **Director** (visada) pueden **Devolver** una solicitud de Obras con un motivo obligatorio, por ejemplo para cambiar una cantidad o agregar un producto. Pasa a *devuelta* y el motivo se ve en Solicitudes y en la bitácora.
+- El usuario de Obras la abre con **Corregir y reenviar**, cambia lo que haga falta y guarda: vuelve a *pendiente* para la revisión del ITO. Si la corrige el ITO, queda *visada* y pasa al Director.
+- No se devuelven las ya aprobadas ni las que nacen de una Cotización Obras (esas se rechazan si hay que rehacerlas). Cada devolución exige su propio motivo.
+- Requiere correr una vez `Documentacion/devolver-solicitud.sql` en Supabase.
+
 ### ITO — revisar y tramitar
 - **Revisar:** en **Solicitudes**, las de Obras en *pendiente* tienen **Ver**, **Dar V°B°** y **Rechazar** (el rechazo pide motivo).
 - **Expedientes → Abrir** una solicitud aprobada:

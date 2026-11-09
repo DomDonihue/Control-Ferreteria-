@@ -232,6 +232,7 @@ td.num, th.num{ text-align:right; font-variant-numeric:tabular-nums; }
 .pill.enviada, .pill.emitida{ background:var(--purple-tint); color:var(--purple); }
 .pill.comprada, .pill.facturada, .pill.visada{ background:var(--info-tint); color:var(--info); }
 .pill.rechazada{ background:var(--critical-tint); color:var(--critical); }
+.pill.devuelta{ background:var(--purple-tint); color:var(--purple); }
 .pill.anulada{ background:var(--muted-tint); color:var(--ink-soft); }
 
 /* ---------- FILA / DOCUMENTO ANULADO ---------- */

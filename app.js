@@ -189,6 +189,11 @@ async function actualizarNotificaciones() {
       const { count: porEmitir } = await sb.from("proceso_cotizacion").select("id", { count: "exact", head: true }).eq("estado", "borrador");
       if (porEmitir) partes.push({ n: porEmitir, texto: `${porEmitir} solicitud${porEmitir === 1 ? "" : "es"} de cotización por emitir`, ir: "procesos" });
     }
+    if (rol === "solicitante_obras") {
+      // Las devueltas de su dirección esperan su corrección (la política de lectura ya las limita).
+      const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "devuelta");
+      if (count) partes.push({ n: count, texto: `${count} solicitud${count === 1 ? "" : "es"} devuelta${count === 1 ? "" : "s"} para corregir`, ir: "solicitudes" });
+    }
     if (["admin", "admin_ito"].includes(rol)) {
       const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true }).eq("estado", "aprobada");
       if (count) partes.push({ n: count, texto: `${count} aprobada${count === 1 ? "" : "s"}, lista${count === 1 ? "" : "s"} para tramitar con la empresa`, ir: "expedientes" });
@@ -634,6 +639,7 @@ function svgSolicitudesPorMes(solicitudes) {
 // sección 5. Se puede cargar el PDF editable y autocompletar.
 // =====================================================================
 let lineasSolicitud = [];
+let edicionOperaciones = null;   // id de la solicitud devuelta que se está corrigiendo
 let catalogoPorDesc = new Map(); // descripción normalizada → fila de `articulo` (para autocompletar unidad/artículo)
 
 // Buscador del catálogo: filtra mientras se escribe (sin tildes, todas las
@@ -997,9 +1003,31 @@ async function guardarSolicitud() {
 // interno de la propia Dirección de Obras no necesita tanta tramitación.
 // Igual queda "pendiente" del V°B° del Director de Obras.
 // ---------------------------------------------------------------------
-async function vistaNuevaSolicitudOperaciones() {
+async function vistaNuevaSolicitudOperaciones(editarId = null) {
+  edicionOperaciones = typeof editarId === "string" ? editarId : null;
   const { data: todasUnidades } = await sb.from("unidad").select("id, nombre").order("nombre");
   lineasSolicitud = [];
+
+  // Modo corrección: se cargan los datos y los productos de la solicitud devuelta.
+  let previa = null;
+  if (edicionOperaciones) {
+    const { data, error } = await sb.from("solicitud")
+      .select("*, solicitud_detalle(articulo_id, descripcion_libre, unidad_medida_libre, cantidad_solicitada, articulo(descripcion, unidad_medida))")
+      .eq("id", edicionOperaciones).single();
+    if (error || !data || data.estado !== "devuelta") {
+      alert("Esta solicitud ya no está devuelta para corregir.");
+      edicionOperaciones = null;
+      vistaSolicitudes();
+      return;
+    }
+    previa = data;
+    lineasSolicitud = (data.solicitud_detalle || []).map(d => ({
+      descripcion: d.articulo?.descripcion || d.descripcion_libre,
+      articulo_id: d.articulo_id,
+      cantidad_solicitada: Number(d.cantidad_solicitada),
+      unidad_medida: d.unidad_medida_libre || d.articulo?.unidad_medida || "",
+    }));
+  }
 
   // Los usuarios de Obras solo piden a nombre de su dirección (la de su perfil).
   const soloObras = rolEfectivo() === "solicitante_obras";
@@ -1007,12 +1035,13 @@ async function vistaNuevaSolicitudOperaciones() {
 
   vista().innerHTML = `
     <div class="card">
-      <h3 style="margin-top:0">Solicitud Obras — Dirección de Obras</h3>
-      <p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras
+      <h3 style="margin-top:0">${previa ? `Corregir la solicitud ${esc(numSol(previa))}` : "Solicitud Obras — Dirección de Obras"}</h3>
+      ${previa ? `<p class="hint"><strong>Devuelta:</strong> ${esc(previa.motivo_devolucion) || "—"}<br>Cambia las cantidades, agrega o quita productos y reenvía.
+        ${rolEfectivo() === "solicitante_obras" ? "Vuelve a la revisión del ITO." : "Queda visada y pasa al Director."}</p>` : `<p class="hint">Formulario corto para requerimientos internos de la Dirección de Obras
         (Operaciones, Aseo y Ornato, Edificios). El N° de solicitud se genera automáticamente.
         ${soloObras
           ? `Al ingresarla queda <span class="pill pendiente">pendiente</span> de la revisión del ITO; con su V°B° pasa al Director de Obras para su aprobación.`
-          : `Al ingresarla pasa directo al V°B° del Director de Obras.`}</p>
+          : `Al ingresarla pasa directo al V°B° del Director de Obras.`}</p>`}
       ${soloObras && !unidades.length ? `<p class="error">Tu perfil no tiene una dirección asignada. Pide al administrador que te la asigne en Usuarios.</p>` : ""}
 
       <label>Dirección responsable</label>
@@ -1043,10 +1072,20 @@ async function vistaNuevaSolicitudOperaciones() {
       </div>
       <p class="error oculto" id="nso-mat-msg"></p>
 
-      <button class="primario" id="nso-guardar">Ingresar solicitud</button>
+      <button class="primario" id="nso-guardar">${previa ? "Guardar y reenviar" : "Ingresar solicitud"}</button>
       <p class="error oculto" id="nso-error"></p>
     </div>
   `;
+
+  if (previa) {
+    const setv = (id, v) => { document.getElementById(id).value = v || ""; };
+    setv("nso-unidad", previa.unidad_id);
+    document.getElementById("nso-unidad").disabled = true;
+    setv("nso-unidad-interna", previa.unidad_interna);
+    setv("nso-solicitante", previa.solicitante);
+    setv("nso-ubicacion", previa.ubicacion);
+    setv("nso-motivo", previa.motivo);
+  }
 
   const { data: articulos } = await sb.from("articulo").select("id, descripcion, unidad_medida").order("descripcion");
   catalogoPorDesc = new Map((articulos || []).map(a => [(a.descripcion || "").trim().toLowerCase(), a]));
@@ -1115,6 +1154,24 @@ async function guardarSolicitudOperaciones() {
     if (!solicitante) { mostrarError("Indica el responsable del requerimiento."); return; }
     if (!ubicacion) { mostrarError("Indica la ubicación de uso de los materiales."); return; }
     if (!lineasSolicitud.length) { mostrarError("Agrega al menos un material."); return; }
+
+    // Corrección de una solicitud devuelta: la función de la base reemplaza los
+    // productos y cambia el estado en una sola operación.
+    if (edicionOperaciones) {
+      const { data: nuevo, error: errR } = await sb.rpc("reenviar_solicitud", {
+        p_id: edicionOperaciones, p_unidad_interna: unidad_interna, p_solicitante: solicitante,
+        p_ubicacion: ubicacion, p_motivo: val("nso-motivo"),
+        p_lineas: lineasSolicitud.map(l => ({ articulo_id: l.articulo_id || null, descripcion: l.descripcion, unidad_medida: l.unidad_medida || null, cantidad: l.cantidad_solicitada })),
+      });
+      if (errR) { mostrarError(errR.message); return; }
+      edicionOperaciones = null;
+      actualizarNotificaciones();
+      vista().innerHTML = `<div class="card">
+        <h3 style="margin-top:0">Solicitud corregida y reenviada</h3>
+        <p>Queda <span class="pill ${esc(nuevo)}">${esc(nuevo)}</span>${nuevo === "pendiente" ? " y vuelve a la revisión del ITO." : " y espera la aprobación del Director de Obras."}</p>
+      </div>`;
+      return;
+    }
 
     // Los usuarios de Obras quedan "pendiente" de la revisión del ITO. Si la
     // crea el propio Encargado (o el admin), no se revisa a sí mismo: entra
@@ -1414,7 +1471,7 @@ function listaPintar(clave) {
        <button class="secundario" ${L.pag >= paginas ? "disabled" : ""} onclick="listaPagina('${clave}',${L.pag + 1})">Siguiente ›</button></div>`
     : `<p class="hint">No hay resultados${L.filas.length ? " con ese filtro" : ""}.</p>`;
 }
-const ESTADOS_SOLICITUD = ["pendiente", "visada", "aprobada", "rechazada", "enviada", "recibida", "facturada", "cerrada"];
+const ESTADOS_SOLICITUD = ["pendiente", "visada", "devuelta", "aprobada", "rechazada", "enviada", "recibida", "facturada", "cerrada"];
 
 async function vistaSolicitudes() {
   vista().innerHTML = "<div class='card'>Cargando…</div>";
@@ -1454,7 +1511,7 @@ async function vistaSolicitudes() {
               ${s.ubicacion ? `<div class="hint">📍 ${esc(s.ubicacion)}</div>` : ""}
             </td>
             ${verMonto ? `<td class="num">${celdaMonto(s)}</td>` : ""}
-            <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}</td>
+            <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}${s.estado === "devuelta" && s.motivo_devolucion ? `<div class="hint">Devuelta: ${esc(s.motivo_devolucion)}</div>` : ""}</td>
             <td>${accionesSolicitud(s)}</td>
           </tr>`);
   listaPintar("sol");
@@ -1467,18 +1524,40 @@ function accionesSolicitud(s) {
   const btn = (txt, estado, etapa) =>
     `<button class="secundario" onclick="resolverSolicitud('${s.id}','${estado}'${etapa ? `,'${etapa}'` : ""})">${txt}</button>`;
   const ver = `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver</button>`;
+  // Se pueden devolver, antes de la aprobación, las solicitudes de Obras hechas
+  // con el formulario (las que nacen de una cotización no se editan).
+  const devolvible = s.tipo === "operaciones" && !s.proceso_cotizacion_id;
 
   if (puedeOperar() && s.tipo === "operaciones" && s.estado === "pendiente") {
-    return `${ver} ${btn("Dar V°B°", "visada", "ito")} ${btn("Rechazar", "rechazada", "ito")}`;
+    return `${ver} ${btn("Dar V°B°", "visada", "ito")} ${devolvible ? btn("Devolver", "devuelta") : ""} ${btn("Rechazar", "rechazada", "ito")}`;
   }
   if (esDirector() && (s.estado === "visada" || (s.estado === "pendiente" && s.tipo !== "operaciones"))) {
-    return `${ver} ${btn("Aprobar", "aprobada")} ${btn("Rechazar", "rechazada")}`;
+    return `${ver} ${btn("Aprobar", "aprobada")} ${s.estado === "visada" && devolvible ? btn("Devolver", "devuelta") : ""} ${btn("Rechazar", "rechazada")}`;
   }
-  const espera = s.tipo === "operaciones" && s.estado === "pendiente" ? `<div class="hint">En revisión del ITO</div>` : "";
+  if (puedeOperar() && devolvible && s.estado === "visada") {
+    return `${ver} ${btn("Devolver", "devuelta")}`;
+  }
+  if (s.estado === "devuelta" && devolvible && (puedeOperar() || rolEfectivo() === "solicitante_obras")) {
+    return `${ver} <button class="primario" onclick="editarSolicitudDevuelta('${s.id}')">Corregir y reenviar</button>`;
+  }
+  const espera = s.tipo === "operaciones" && s.estado === "pendiente" ? `<div class="hint">En revisión del ITO</div>`
+    : s.estado === "devuelta" ? `<div class="hint">Devuelta para corrección</div>` : "";
   return `<button class="secundario" onclick="abrirExpediente('${s.id}')">Ver expediente</button>${espera}`;
 }
 
+function editarSolicitudDevuelta(id) { vistaNuevaSolicitudOperaciones(id); }
+
 async function resolverSolicitud(id, estado, etapa) {
+  // Devolver: vuelve a quien la hizo para que corrija cantidades o productos.
+  if (estado === "devuelta") {
+    const motivo = await confirmar({ titulo: "Devolver la solicitud", texto: "Vuelve a quien la hizo para que la corrija (cantidades, productos, datos) y la reenvíe. El motivo es obligatorio.", boton: "Devolver", motivo: true });
+    if (!motivo) return;
+    const { error: errDev } = await sb.rpc("devolver_solicitud", { p_id: id, p_motivo: motivo });
+    if (errDev) { alert("No se pudo devolver la solicitud: " + errDev.message); return; }
+    actualizarNotificaciones();
+    vistaSolicitudes();
+    return;
+  }
   const cambios = etapa === "ito"
     ? { estado, visado_por: perfilActual.id, visado_en: new Date().toISOString() }
     : { estado, aprobado_por: perfilActual.id };

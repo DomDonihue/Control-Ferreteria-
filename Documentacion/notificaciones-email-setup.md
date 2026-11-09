@@ -1,8 +1,9 @@
 # Notificaciones por correo (Director y ITO)
 
-Envía un correo real cuando:
-- se ingresa una solicitud → al **Director de Obras** (rol `lector_operativo`)
-- el Director la aprueba → al **ITO** (rol `admin_ito`)
+Envía un correo real, con el N° de solicitud, quién solicita, el motivo y el enlace a la plataforma, cuando:
+- una solicitud de la Dirección de Obras queda pendiente → al **ITO** (rol `admin_ito`): "por visar"
+- una solicitud pendiente de otra dirección, o una visada por el ITO → al **Director de Obras** (rol `lector_operativo`): "por aprobar"
+- el Director la aprueba → al **ITO** (rol `admin_ito`): "lista para tramitar"
 
 El código ya está listo en [notificar-solicitud-edge-function.ts](notificar-solicitud-edge-function.ts).
 Estos son los pasos para activarlo (los haces tú, una sola vez):
@@ -36,6 +37,13 @@ supabase secrets set RESEND_API_KEY=tu_api_key_de_resend
 supabase secrets set NOTIF_FROM_EMAIL="Control Ferretería <notificaciones@donihue.cl>"
 ```
 
+Enlace de acceso que irá en el correo (cámbialo cuando quieras con el mismo comando) y una clave
+para que solo tu webhook pueda disparar correos (inventa una larga, sin espacios):
+```bash
+supabase secrets set NOTIF_APP_URL="https://domdonihue.github.io/Control-Ferreteria-/"
+supabase secrets set NOTIF_WEBHOOK_SECRET=una_clave_larga_inventada
+```
+
 Despliega (sin exigir login de usuario, porque la llama un webhook interno, no una persona):
 ```bash
 supabase functions deploy notificar-solicitud --no-verify-jwt
@@ -49,6 +57,7 @@ En el panel de Supabase: **Database → Webhooks → Create a new hook**
 - Type: **Supabase Edge Functions**
 - Edge Function: `notificar-solicitud`
 - Method: `POST`
+- **HTTP Headers:** agrega `x-webhook-secret` con el mismo valor de `NOTIF_WEBHOOK_SECRET`.
 - Guarda.
 
 ## 5. Prueba
