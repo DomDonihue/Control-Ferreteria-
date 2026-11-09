@@ -1497,8 +1497,6 @@ async function vistaSolicitudes() {
 
   vista().innerHTML = `
     <div class="card">
-      ${esDirector() ?`<p class="hint">Como Director de Obras apruebas o rechazas las solicitudes pendientes. Las de la Dirección de Obras llegan a ti ya con el V°B° del ITO (estado <span class="pill visada">visada</span>).</p>` : ""}
-      ${puedeOperar() ? `<p class="hint">Solicitudes de la Dirección de Obras en estado <span class="pill pendiente">pendiente</span>: revísalas y da tu V°B° para que pasen al Director, o recházalas.</p>` : ""}
       ${listaBarra("sol", ESTADOS_SOLICITUD)}
     </div>
   `;
