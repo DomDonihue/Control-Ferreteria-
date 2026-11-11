@@ -78,6 +78,13 @@ Las demás direcciones siguen con el procedimiento anterior.
 5. **Comparar:** el sistema muestra producto por producto el precio de cada proveedor, el total, cuál es el más conveniente y cuánto se aleja el proveedor del contrato de la mejor cotización externa. Queda como respaldo de que el precio es el más conveniente.
 6. **Crear la solicitud especial:** con las 3 cotizaciones completas aparece **Crear solicitud especial**. Nace una solicitud de Obras con esos productos y los precios del proveedor del contrato; sigue el recorrido normal (V°B° del ITO, aprobación del Director, hoja a la ferretería, guías y factura) y la factura se **descuenta del convenio**. En su expediente quedan las 3 cotizaciones.
 
+### Carpeta de cotizaciones, borrador y memoria
+- **Carpeta:** **Cotización Obras** lista todas las solicitudes de cotización con buscador, filtro por estado (*en preparación, por emitir, cotizando, completa, solicitud creada*), orden por columnas y una columna **Cotizaciones** con el avance ("2 de 3 · falta proveedor del contrato").
+- **Borrador privado:** al crear una solicitud de cotización usa **Guardar borrador**: queda *en preparación*, solo la ves tú y **no se avisa al ITO**. Puedes dejarla con una sola cotización externa, cerrarla y volver más tarde (ábrela desde la carpeta y pulsa **Seguir editando**) hasta completar los productos y las 2 cotizaciones externas. Entonces pulsa **Enviar al ITO**.
+- **Cotización de Hevia:** solo la registra el ITO (cuando el proveedor del contrato responde). Quien hizo la solicitud sube las 2 externas.
+- **Memoria de cotización (PDF):** con las 3 cotizaciones completas, **Descargar memoria de cotización** genera un PDF con los proveedores, el cuadro comparativo producto por producto, la cotización de menor valor, el proveedor seleccionado y la firma del ITO. Se descarga desde la cotización y desde el expediente de la solicitud que nace de ella.
+- Requiere correr una vez `Documentacion/cotizaciones-borrador.sql` en Supabase.
+
 ### Devolver una solicitud para corregirla (Dirección de Obras)
 Antes de que el Director la apruebe se puede **Devolver** una solicitud de Obras, con un motivo obligatorio (por ejemplo, para cambiar una cantidad o agregar un producto). **Vuelve a la persona anterior del recorrido**:
 - Si la devuelve el **Director** (solicitud visada), vuelve al **ITO**. El ITO la corrige con **Corregir y reenviar** (queda *visada* y pasa de nuevo al Director) o la pasa al solicitante con **Devolver al solicitante** (con su propio motivo).
