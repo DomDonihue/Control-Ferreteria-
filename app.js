@@ -1537,7 +1537,7 @@ async function vistaSolicitudes() {
   `;
   listaCrear("sol", data,
     (s) => `${numSol(s)} ${s.motivo} ${s.unidad?.nombre} ${s.obra?.nombre} ${s.solicitante} ${s.ubicacion} ${s.fecha_solicitud}`,
-    `<tr><th>N°</th><th>Fecha</th><th>Unidad / solicita</th><th>Motivo</th>${verMonto ? `<th class="num">Monto estimado</th>` : ""}<th>Estado</th><th></th></tr>`,
+    null,
     (s) => `
           <tr>
             <td class="num">${esc(numSol(s)) || "—"}</td>
@@ -1550,7 +1550,21 @@ async function vistaSolicitudes() {
             ${verMonto ? `<td class="num">${celdaMonto(s)}</td>` : ""}
             <td><span class="pill ${s.estado}">${s.estado}</span>${s.estado === "rechazada" && s.motivo_rechazo ? `<div class="hint">Motivo: ${esc(s.motivo_rechazo)}</div>` : ""}${s.estado === "devuelta" && s.motivo_devolucion ? `<div class="hint">Devuelta${s.devuelta_a === "ito" ? " al ITO" : ""}: ${esc(s.motivo_devolucion)}</div>` : ""}</td>
             <td>${accionesSolicitud(s)}</td>
-          </tr>`);
+          </tr>`,
+    // Títulos ordenables (clic = menor a mayor; otro clic = al revés). Sin orden inicial:
+    // arranca con las más nuevas primero.
+    [
+      { titulo: "N°", valor: (s) => numSol(s) || null },
+      { titulo: "Fecha", valor: (s) => s.fecha_solicitud || null },
+      { titulo: "Unidad / solicita", valor: (s) => s.unidad?.nombre || null },
+      { titulo: "Motivo", valor: (s) => s.motivo || null },
+      ...(verMonto ? [{ titulo: "Monto estimado", clase: "num", valor: (s) => {
+        const det = s.solicitud_detalle || [];
+        return det.some(d => valorUnitarioNeto(d) != null) ? totalesDetalle(det).bruto : null;
+      } }] : []),
+      { titulo: "Estado", valor: (s) => (s.estado ? ESTADOS_SOLICITUD.indexOf(s.estado) : null) },
+      { titulo: "" },
+    ]);
   listaPintar("sol");
 }
 
@@ -1682,6 +1696,14 @@ async function vistaExpedientes(filtroUnidad) {
   const sols = filtroUnidad ? (solsTodas || []).filter(s => s.unidad?.nombre === filtroUnidad) : solsTodas;
 
   const cuenta = (arr, id) => (arr || []).filter(x => x.solicitud_id === id && !x.anulado);
+  // Guías y factura vigentes de una solicitud y su total (la factura manda sobre las guías).
+  const datosExp = (s) => {
+    const g = cuenta(guias, s.id);
+    const f = cuenta(facturas, s.id);
+    const totalBruto = f.length ? f.reduce((a, x) => a + Number(x.monto_bruto || 0), 0)
+                                : g.reduce((a, x) => a + Number(x.monto_bruto || 0), 0);
+    return { g, f, totalBruto };
+  };
   vista().innerHTML = `
     <div class="card">
       <h3 style="margin-top:0">Expedientes de solicitudes</h3>
@@ -1692,12 +1714,9 @@ async function vistaExpedientes(filtroUnidad) {
   `;
   listaCrear("exp", sols || [],
     (s) => `${numSol(s)} ${s.motivo} ${s.unidad?.nombre} ${s.solicitante} ${s.fecha_solicitud}`,
-    `<tr><th>N°</th><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Guías</th><th>Factura</th><th class="num">Total bruto</th><th></th></tr>`,
+    null,
     (s) => {
-          const g = cuenta(guias, s.id);
-          const f = cuenta(facturas, s.id);
-          const totalBruto = f.length ? f.reduce((a, x) => a + Number(x.monto_bruto || 0), 0)
-                                      : g.reduce((a, x) => a + Number(x.monto_bruto || 0), 0);
+          const { g, f, totalBruto } = datosExp(s);
           return `<tr>
             <td class="num">${esc(numSol(s)) || "—"}</td>
             <td>${s.fecha_solicitud || ""}</td>
@@ -1709,7 +1728,20 @@ async function vistaExpedientes(filtroUnidad) {
             <td class="num">${totalBruto ? money(totalBruto) : "—"}</td>
             <td><button class="secundario" onclick="abrirExpediente('${s.id}')">Abrir</button></td>
           </tr>`;
-    });
+    },
+    // Títulos ordenables (clic = menor a mayor; otro clic = al revés). Sin orden inicial:
+    // arranca con las más nuevas primero.
+    [
+      { titulo: "N°", valor: (s) => numSol(s) || null },
+      { titulo: "Fecha", valor: (s) => s.fecha_solicitud || null },
+      { titulo: "Unidad", valor: (s) => s.unidad?.nombre || null },
+      { titulo: "Motivo", valor: (s) => s.motivo || null },
+      { titulo: "Estado", valor: (s) => (s.estado ? ESTADOS_SOLICITUD.indexOf(s.estado) : null) },
+      { titulo: "Guías", clase: "num", valor: (s) => datosExp(s).g.length },
+      { titulo: "Factura", valor: (s) => datosExp(s).f.length },
+      { titulo: "Total bruto", clase: "num", valor: (s) => datosExp(s).totalBruto || null },
+      { titulo: "" },
+    ]);
   listaPintar("exp");
 }
 
