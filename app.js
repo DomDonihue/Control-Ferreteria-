@@ -1458,8 +1458,17 @@ async function cargarTodas(armar) {
   }
 }
 
-function listaCrear(clave, filas, textoFn, cabecera, filaFn) {
-  _lista[clave] = { q: "", estado: "", pag: 1, filas, textoFn, cabecera, filaFn };
+// `columnas` (opcional) hace ordenables los títulos: [{ titulo, clase, valor(fila) }]
+// (una columna sin `valor` no ordena). `ordenInicial`: { i: columna, dir: 1 | -1 }.
+function listaCrear(clave, filas, textoFn, cabecera, filaFn, columnas, ordenInicial) {
+  _lista[clave] = { q: "", estado: "", pag: 1, filas, textoFn, cabecera, filaFn, columnas: columnas || null, orden: ordenInicial || null };
+}
+// Un clic ordena de menor a mayor; otro clic en la misma columna invierte.
+function listaOrdenar(clave, i) {
+  const L = _lista[clave];
+  L.orden = L.orden && L.orden.i === i ? { i, dir: -L.orden.dir } : { i, dir: 1 };
+  L.pag = 1;
+  listaPintar(clave);
 }
 function listaBarra(clave, estados) {
   return `<div class="barra-lista">
@@ -1473,12 +1482,29 @@ function listaPintar(clave) {
   const L = _lista[clave], el = document.getElementById("lista-" + clave);
   if (!el) return;
   const q = _sinTildes(L.q).trim();
-  const f = L.filas.filter(s => (!L.estado || s.estado === L.estado) && (!q || _sinTildes(L.textoFn(s)).includes(q)));
+  let f = L.filas.filter(s => (!L.estado || s.estado === L.estado) && (!q || _sinTildes(L.textoFn(s)).includes(q)));
+  if (L.columnas && L.orden) {
+    const { i, dir } = L.orden, valor = L.columnas[i] && L.columnas[i].valor;
+    if (valor) {
+      // Los vacíos van siempre al final, sea cual sea el sentido.
+      f = f.slice().sort((a, b) => {
+        const x = valor(a), y = valor(b), vx = x == null || x === "", vy = y == null || y === "";
+        if (vx || vy) return vx && vy ? 0 : vx ? 1 : -1;
+        const r = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "es", { numeric: true });
+        return r * dir;
+      });
+    }
+  }
+  const cabecera = L.columnas
+    ? `<tr>${L.columnas.map((c, i) => c.valor
+        ? `<th class="ordenable ${c.clase || ""}" onclick="listaOrdenar('${clave}',${i})" title="Ordenar por ${esc(c.titulo)}">${esc(c.titulo)}${L.orden && L.orden.i === i ? (L.orden.dir === 1 ? " ▲" : " ▼") : ""}</th>`
+        : `<th></th>`).join("")}</tr>`
+    : L.cabecera;
   const paginas = Math.max(1, Math.ceil(f.length / POR_PAGINA));
   L.pag = Math.min(Math.max(1, L.pag), paginas);
   const ini = (L.pag - 1) * POR_PAGINA;
   el.innerHTML = f.length
-    ? `<table>${L.cabecera}${f.slice(ini, ini + POR_PAGINA).map(L.filaFn).join("")}</table>
+    ? `<table>${cabecera}${f.slice(ini, ini + POR_PAGINA).map(L.filaFn).join("")}</table>
        <div class="paginador"><button class="secundario" ${L.pag <= 1 ? "disabled" : ""} onclick="listaPagina('${clave}',${L.pag - 1})">‹ Anterior</button>
        <span>Página ${L.pag} de ${paginas} · ${f.length} resultado${f.length === 1 ? "" : "s"}</span>
        <button class="secundario" ${L.pag >= paginas ? "disabled" : ""} onclick="listaPagina('${clave}',${L.pag + 1})">Siguiente ›</button></div>`
@@ -2053,7 +2079,7 @@ async function vistaBitacora() {
     </div>`;
   listaCrear("bit", filas,
     (s) => `${numSol(s)} ${s.motivo} ${s.unidad?.nombre} ${s.solicitante} ${s.fecha_solicitud}`,
-    `<tr><th>N°</th><th>Fecha</th><th>Unidad</th><th>Motivo</th><th>Estado</th><th class="num">Movimientos</th><th>Último</th><th></th></tr>`,
+    null,
     (s) => {
       const r = resumen[s.id] || { n: 0, ultimo: null };
       return `<tr>
@@ -2066,7 +2092,19 @@ async function vistaBitacora() {
         <td>${r.ultimo ? _fechaHora(r.ultimo) : "—"}</td>
         <td><button class="secundario" onclick="bitacoraSolicitud('${s.id}')">Ver bitácora</button></td>
       </tr>`;
-    });
+    },
+    // Títulos ordenables: clic = menor a mayor; otro clic = al revés. Empieza por N°.
+    [
+      { titulo: "N°", valor: (s) => numSol(s) || null },
+      { titulo: "Fecha", valor: (s) => s.fecha_solicitud || null },
+      { titulo: "Unidad", valor: (s) => s.unidad?.nombre || null },
+      { titulo: "Motivo", valor: (s) => s.motivo || null },
+      { titulo: "Estado", valor: (s) => (s.estado ? ESTADOS_SOLICITUD.indexOf(s.estado) : null) },
+      { titulo: "Movimientos", clase: "num", valor: (s) => (resumen[s.id] ? resumen[s.id].n : 0) },
+      { titulo: "Último", valor: (s) => (resumen[s.id] ? resumen[s.id].ultimo : null) },
+      { titulo: "" },
+    ],
+    { i: 0, dir: 1 });
   listaPintar("bit");
 }
 
