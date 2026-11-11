@@ -448,6 +448,8 @@ label.chk input[type="checkbox"]{ width:16px; height:16px; flex-shrink:0; accent
 }
 
 .acciones-decision{ display:flex; gap:.6rem; flex-wrap:wrap; margin-top:.6rem; }
+/* El botón dorado de una fila de acciones tiene el mismo tamaño que los demás (conserva el color). */
+.acciones-decision button.primario{ margin-top:.6rem; height:38px; padding:0 1.1rem; font-size:.85rem; font-weight:700; box-shadow:0 4px 12px rgba(242,182,50,.28); }
 
 /* ---------- BUSCADOR, PAGINACIÓN Y CONFIRMACIÓN ---------- */
 .barra-lista{ display:flex; gap:.6rem; flex-wrap:wrap; margin:.6rem 0 .8rem; }

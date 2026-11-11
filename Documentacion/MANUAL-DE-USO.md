@@ -80,7 +80,7 @@ Las demás direcciones siguen con el procedimiento anterior.
 
 ### Carpeta de cotizaciones, borrador y memoria
 - **Carpeta:** **Cotización Obras** lista todas las solicitudes de cotización con buscador, filtro por estado (*en preparación, por emitir, cotizando, completa, solicitud creada*), orden por columnas y una columna **Cotizaciones** con el avance ("2 de 3 · falta proveedor del contrato").
-- **Borrador privado:** al crear una solicitud de cotización usa **Guardar borrador**: queda *en preparación*, solo la ves tú y **no se avisa al ITO**. Puedes dejarla con una sola cotización externa, cerrarla y volver más tarde (ábrela desde la carpeta y pulsa **Seguir editando**) hasta completar los productos y las 2 cotizaciones externas. Entonces pulsa **Enviar al ITO**.
+- **Borrador privado:** al crear una solicitud de cotización usa **Guardar borrador**: queda *en preparación*, solo la ves tú y **no se avisa al ITO**. Puedes dejarla con una sola cotización externa, cerrarla y volver más tarde (ábrela desde la carpeta y pulsa **Seguir editando**) hasta completar los productos y las 2 cotizaciones externas. Entonces pulsa **Enviar**.
 - **Cotización de Hevia:** solo la registra el ITO (cuando el proveedor del contrato responde). Quien hizo la solicitud sube las 2 externas.
 - **Memoria de cotización (PDF):** con las 3 cotizaciones completas, **Descargar memoria de cotización** genera un PDF con los proveedores, el cuadro comparativo producto por producto, la cotización de menor valor, el proveedor seleccionado y la firma del ITO. Se descarga desde la cotización y desde el expediente de la solicitud que nace de ella.
 - Requiere correr una vez `Documentacion/cotizaciones-borrador.sql` en Supabase.

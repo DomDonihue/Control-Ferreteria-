@@ -3356,9 +3356,9 @@ async function vistaNuevoProceso(id) {
       ${!p || p.estado === "preparacion"
         ? `<div class="acciones-decision">
              <button class="secundario" id="np-borrador">Guardar borrador</button>
-             <button class="primario" id="np-guardar">Enviar al ITO</button>
+             <button class="primario" id="np-guardar">Enviar</button>
            </div>
-           <p class="hint">El borrador es privado y no avisa al ITO; puedes cerrarlo y retomarlo cuando quieras. «Enviar al ITO» pide los productos y las 2 cotizaciones externas completas.</p>`
+           <p class="hint">El borrador es privado y no avisa al ITO; puedes cerrarlo y retomarlo cuando quieras. «Enviar» lo manda al ITO y pide los productos y las 2 cotizaciones externas completas.</p>`
         : `<button class="primario" id="np-guardar">Guardar cambios</button>`}
       <p class="error oculto" id="np-error"></p>
     </div>`;
@@ -3521,9 +3521,9 @@ async function vistaProceso(id) {
       </table>
 
       ${sinEmitir ? `
-        <div class="acciones">
+        <div class="acciones acciones-decision">
           <button class="secundario" onclick="vistaNuevoProceso('${p.id}')">${enPrep ? "Seguir editando" : "Editar productos y cotizaciones"}</button>
-          ${enPrep ? `<button class="primario" onclick="enviarProcesoAlITO('${p.id}')" ${externasCompletas && items.length ? "" : "disabled"}>Enviar al ITO</button>` : ""}
+          ${enPrep ? `<button class="primario" onclick="enviarProcesoAlITO('${p.id}')" ${externasCompletas && items.length ? "" : "disabled"}>Enviar</button>` : ""}
         </div>
         ${enPrep ? `<p class="hint">Borrador privado: solo lo ves tú y no se avisó al ITO. ${externasCompletas && items.length ? "Está listo para enviarse." : "Para enviarlo faltan los productos y las 2 cotizaciones externas completas."}</p>` : esITO ? `
           <div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1rem">
@@ -3580,7 +3580,7 @@ async function vistaProceso(id) {
 async function enviarProcesoAlITO(id) {
   if (!_lock()) return;
   try {
-    if (!await confirmar({ titulo: "Enviar al ITO", texto: "Deja de ser un borrador privado: el ITO la verá y podrá emitir el PDF para el proveedor del contrato.", boton: "Enviar al ITO" })) return;
+    if (!await confirmar({ titulo: "Enviar al ITO", texto: "Deja de ser un borrador privado: el ITO la verá y podrá emitir el PDF para el proveedor del contrato.", boton: "Enviar" })) return;
     const { error } = await sb.from("proceso_cotizacion").update({ estado: "borrador" }).eq("id", id);
     if (error) { alert("No se pudo enviar: " + error.message); return; }
     actualizarNotificaciones();
