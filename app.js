@@ -467,9 +467,9 @@ async function vistaResumen() {
   }
   // Gráficos: si fallan (falta alguna tabla/permiso) el resumen igual se ve.
   const [{ data: facturas }, { data: solicitudes }] = await Promise.all([
-    sb.from("factura").select("monto_bruto, solicitud(unidad(nombre))").or("anulado.is.null,anulado.eq.false"),
+    sb.from("factura").select("monto_bruto, solicitud(unidad_interna, unidad(nombre))").or("anulado.is.null,anulado.eq.false"),
     cargarTodas(() => sb.from("solicitud")
-      .select("id, estado, creado_en, unidad(nombre), solicitud_detalle(cantidad_solicitada, precio_unitario_neto, articulo(precio_neto))")
+      .select("id, estado, creado_en, unidad_interna, unidad(nombre), solicitud_detalle(cantidad_solicitada, precio_unitario_neto, articulo(precio_neto))")
       .order("id")),
   ]);
 
@@ -578,9 +578,12 @@ function htmlBarrasPorUnidad(facturas, solicitudes, topeAnual, conSolicitado) {
   const porUnidad = {};
   const fila = (nombre) => (porUnidad[nombre] = porUnidad[nombre] || { comprometido: 0, solicitado: 0, solicitudes: 0 });
 
-  facturas.forEach(f => { fila(f.solicitud?.unidad?.nombre || "Sin unidad").comprometido += Number(f.monto_bruto || 0); });
+  // En la Dirección de Obras se muestra la unidad solicitante (Operaciones, Aseo y Ornato, Edificios);
+  // en las demás direcciones, la dirección.
+  const nombreUnidad = (s) => (s && (s.unidad_interna || s.unidad?.nombre)) || "Sin unidad";
+  facturas.forEach(f => { fila(nombreUnidad(f.solicitud)).comprometido += Number(f.monto_bruto || 0); });
   solicitudes.forEach(s => {
-    const f = fila(s.unidad?.nombre || "Sin unidad");
+    const f = fila(nombreUnidad(s));
     f.solicitudes += 1;
     if (conSolicitado && ["aprobada", "enviada", "recibida"].includes(s.estado)) f.solicitado += totalesDetalle(s.solicitud_detalle || []).bruto;
   });
@@ -1693,7 +1696,7 @@ async function vistaExpedientes(filtroUnidad) {
   ]);
   if (error) { vista().innerHTML = `<div class="card error">${error.message}</div>`; return; }
 
-  const sols = filtroUnidad ? (solsTodas || []).filter(s => s.unidad?.nombre === filtroUnidad) : solsTodas;
+  const sols = filtroUnidad ? (solsTodas || []).filter(s => (s.unidad_interna || s.unidad?.nombre) === filtroUnidad) : solsTodas;
 
   const cuenta = (arr, id) => (arr || []).filter(x => x.solicitud_id === id && !x.anulado);
   // Guías y factura vigentes de una solicitud y su total (la factura manda sobre las guías).
