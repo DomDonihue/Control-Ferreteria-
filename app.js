@@ -181,6 +181,8 @@ async function actualizarNotificaciones() {
       const { count } = await sb.from("solicitud").select("id", { count: "exact", head: true })
         .or("estado.eq.visada,and(estado.eq.pendiente,tipo.neq.operaciones)");
       if (count) partes.push({ n: count, texto: `${count} solicitud${count === 1 ? "" : "es"} esperando tu V°B°`, ir: "solicitudes" });
+      const { count: porEvaluar } = await sb.from("proceso_cotizacion").select("id", { count: "exact", head: true }).eq("estado", "evaluacion");
+      if (porEvaluar) partes.push({ n: porEvaluar, texto: `${porEvaluar} cotización${porEvaluar === 1 ? "" : "es"} por evaluar`, ir: "procesos" });
     }
     if (["admin", "admin_ito"].includes(rol)) {
       const { count: porRevisar } = await sb.from("solicitud").select("id", { count: "exact", head: true })
@@ -191,6 +193,8 @@ async function actualizarNotificaciones() {
       if (delDirector) partes.push({ n: delDirector, texto: `${delDirector} solicitud${delDirector === 1 ? "" : "es"} devuelta${delDirector === 1 ? "" : "s"} por el Director`, ir: "solicitudes" });
       const { count: porEmitir } = await sb.from("proceso_cotizacion").select("id", { count: "exact", head: true }).eq("estado", "borrador");
       if (porEmitir) partes.push({ n: porEmitir, texto: `${porEmitir} solicitud${porEmitir === 1 ? "" : "es"} de cotización por emitir`, ir: "procesos" });
+      const { count: devueltasDir } = await sb.from("proceso_cotizacion").select("id", { count: "exact", head: true }).eq("estado", "emitida").not("motivo_devolucion", "is", null);
+      if (devueltasDir) partes.push({ n: devueltasDir, texto: `${devueltasDir} cotización${devueltasDir === 1 ? "" : "es"} devuelta${devueltasDir === 1 ? "" : "s"} por el Director`, ir: "procesos" });
     }
     if (rol === "solicitante_obras") {
       // Las devueltas de su dirección esperan su corrección (la política de lectura ya las limita).
@@ -403,7 +407,7 @@ const TABS = [
   { id: "resumen", label: "Inicio", grupo: null, icono: "resumen", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: vistaResumen },
   { id: "nueva", label: "Nueva solicitud", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante"], render: vistaNuevaSolicitud },
   { id: "nueva-operaciones", label: "Solicitud Obras", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaNuevaSolicitudOperaciones },
-  { id: "procesos", label: "Cotización Obras", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras"], render: vistaProcesosCotizacion },
+  { id: "procesos", label: "Cotización Obras", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito", "solicitante_obras", "lector_operativo"], render: vistaProcesosCotizacion },
   { id: "cotizar", label: "Solicitar cotización", grupo: "Gestión", icono: "nueva", roles: ["admin", "admin_ito"], render: vistaCotizacionProveedor },
   { id: "solicitudes", label: "Solicitudes", grupo: "Gestión", icono: "solicitudes", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo"], render: vistaSolicitudes },
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
@@ -1916,7 +1920,10 @@ async function vistaExpediente(id) {
           <span class="hint">${esc(procExp.correlativo)} · enviada el ${fechaCL(procExp.fecha_envio)}</span></div>
         ${comparativoHTML(procExp, ofertasExp)}
         <p class="hint">${ofertasExp.filter(o => o.archivo_url).map(o => `${enlaceArchivo(o.archivo_url, `Cotización ${esc(o.proveedor)}`)}`).join(" · ") || "Sin archivos adjuntos."}</p>
-        ${avanceProceso(procExp, ofertasExp).n === 3 ? `<div class="acciones"><button class="secundario" onclick="descargarMemoriaDesdeExpediente()">Descargar memoria de cotización (PDF)</button></div>` : ""}
+        ${avanceProceso(procExp, ofertasExp).n === 3 || s.n_orden_compra ? `<div class="acciones acciones-decision">
+          ${s.n_orden_compra ? `<button class="primario" onclick="descargarOrdenDesdeExpediente()">Descargar orden de compra (PDF)</button>` : ""}
+          ${avanceProceso(procExp, ofertasExp).n === 3 ? `<button class="secundario" onclick="descargarMemoriaDesdeExpediente()">Descargar memoria de cotización (PDF)</button>` : ""}
+        </div>` : ""}
       </div>` : ""}
 
     ${especial ? bloqueCompraEspecial(s, cotizaciones || [], opero) : ""}
@@ -3001,11 +3008,13 @@ const ESTADO_PROCESO = {
   borrador: { texto: "por emitir", clase: "pendiente" },        // enviada al ITO
   emitida: { texto: "cotizando", clase: "emitida" },
   completa: { texto: "completa", clase: "recibida" },           // cotizando con las 3 cotizaciones completas
-  solicitud_creada: { texto: "solicitud creada", clase: "aprobada" },
+  evaluacion: { texto: "en evaluación del Director", clase: "enviada" },
+  solicitud_creada: { texto: "compra aprobada", clase: "aprobada" },
+  rechazada: { texto: "rechazada", clase: "rechazada" },
 };
 const ESTADOS_PROCESO_LISTA = [
   ["preparacion", "en preparación"], ["borrador", "por emitir"], ["emitida", "cotizando"],
-  ["completa", "completa"], ["solicitud_creada", "solicitud creada"],
+  ["completa", "completa"], ["evaluacion", "en evaluación del Director"], ["solicitud_creada", "compra aprobada"], ["rechazada", "rechazada"],
 ];
 const pillProceso = (e) => { const x = ESTADO_PROCESO[e] || { texto: e, clase: "" }; return `<span class="pill ${x.clase}">${x.texto}</span>`; };
 
@@ -3032,8 +3041,11 @@ function totalOferta(items, oferta) {
     if (!(p > 0)) return null;
     neto += p * Number(it.cantidad || 0);
   }
-  const iva = Math.round(neto * 0.19);
-  return { neto, iva, bruto: neto + iva };
+  // Flete aparte (neto) de las externas; el de Hevia va incluido en sus precios.
+  const flete = Number(oferta.flete) || 0;
+  const total = neto + flete;
+  const iva = Math.round(total * 0.19);
+  return { productos: neto, flete, neto: total, iva, bruto: total + iva };
 }
 
 // Cuadro comparativo producto por producto de las cotizaciones registradas.
@@ -3061,7 +3073,8 @@ function comparativoHTML(proceso, ofertas) {
   return `<div style="overflow-x:auto"><table>
     <tr><th>Producto</th><th class="num">Cant.</th><th>Unidad</th>${cols.map(c => `<th class="num">${c.titulo}<div class="hint">${c.o ? esc(c.o.proveedor) : "sin registrar"}</div></th>`).join("")}</tr>
     ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>${cols.map(c => { const p = c.o ? Number((c.o.precios || {})[it.id]) : 0; return `<td class="num">${p > 0 ? money(p) : "—"}</td>`; }).join("")}</tr>`).join("")}
-    <tr><td colspan="3" style="text-align:right">Total neto</td>${cols.map(c => `<td class="num"${marca(c)}>${c.t ? money(c.t.neto) : (c.o ? "incompleta" : "—")}</td>`).join("")}</tr>
+    ${cols.some(c => c.t && c.t.flete > 0) ? `<tr><td colspan="3" style="text-align:right">Flete (neto, aparte)</td>${cols.map(c => `<td class="num">${c.t ? (c.t.flete > 0 ? money(c.t.flete) : (c.slot === 1 ? "incluido" : "—")) : "—"}</td>`).join("")}</tr>` : ""}
+    <tr><td colspan="3" style="text-align:right">Total neto${cols.some(c => c.t && c.t.flete > 0) ? " (con flete)" : ""}</td>${cols.map(c => `<td class="num"${marca(c)}>${c.t ? money(c.t.neto) : (c.o ? "incompleta" : "—")}</td>`).join("")}</tr>
     <tr><td colspan="3" style="text-align:right">IVA 19%</td>${cols.map(c => `<td class="num">${c.t ? money(c.t.iva) : "—"}</td>`).join("")}</tr>
     <tr><td colspan="3" style="text-align:right;font-weight:700">Total con IVA</td>${cols.map(c => `<td class="num" style="font-weight:700">${c.t ? money(c.t.bruto) : "—"}</td>`).join("")}</tr>
   </table></div>${concl}`;
@@ -3086,7 +3099,7 @@ async function vistaProcesosCotizacion() {
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
         <h3 style="margin:0">Cotización Obras</h3>
-        <button class="primario" style="margin-top:0" onclick="vistaNuevoProceso()">+ Nueva solicitud de cotización</button>
+        ${rolEfectivo() === "lector_operativo" ? "" : `<button class="primario" style="margin-top:0" onclick="vistaNuevoProceso()">+ Nueva solicitud de cotización</button>`}
       </div>
       <p class="hint">Carpeta de cotizaciones. Para productos que no están en el catálogo del contrato: se piden 3 cotizaciones (proveedor del contrato y 2 externas) y con ellas se crea la solicitud especial. Puedes guardar un borrador privado y completarlo cuando tengas las cotizaciones.</p>
       ${listaBarra("cot", ESTADOS_PROCESO_LISTA)}
@@ -3122,7 +3135,7 @@ async function vistaProcesosCotizacion() {
 let procesoItems = [];
 let procesoIdEnEdicion = null;
 let procesoEstadoEdicion = null;   // 'preparacion' | 'borrador' | null (nueva)
-const ofertaVacia = () => ({ proveedor: "", numero: "", fecha: "", archivo_url: null, file: null, precios: [] });
+const ofertaVacia = () => ({ proveedor: "", numero: "", fecha: "", archivo_url: null, file: null, precios: [], flete: "" });
 let procesoExt = { 2: ofertaVacia(), 3: ofertaVacia() };
 
 function quitarItemProceso(i) {
@@ -3162,6 +3175,10 @@ function pintarOfertasExt() {
         ${procesoItems.map((it, i) => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
           <td class="num"><input class="ne-precio" data-i="${i}" type="number" min="0" step="1" value="${esc(o.precios[i] ?? "")}" style="width:7rem;text-align:right"></td></tr>`).join("")}
       </table>` : `<p class="hint">Agrega los productos para anotar los precios.</p>`}
+      <div class="linea-detalle" style="grid-template-columns:1fr 2fr">
+        <div><label>Flete neto (si lo cobra aparte)</label><input class="ne-flete" type="number" min="0" step="1" value="${esc(o.flete)}" style="text-align:right"></div>
+        <p class="hint" style="margin:0">Hevia incluye el flete; si esta empresa lo cobra aparte, anótalo para que la comparación sea justa.</p>
+      </div>
       <label>PDF de la cotización ${o.archivo_url ? `· ${enlaceArchivo(o.archivo_url, `ver adjunto actual`)}` : ""}</label>
       <input class="ne-file" type="file" accept=".pdf,.doc,.docx,image/*">
       <p class="hint ne-file-msg">${o.file ? "Archivo elegido: " + esc(o.file.name) : (o.archivo_url ? "Ya hay un archivo adjunto; elige otro solo si quieres reemplazarlo." : "Adjunta la cotización recibida del proveedor.")}</p>
@@ -3175,6 +3192,7 @@ function pintarOfertasExt() {
     card.querySelector(".ne-prov").addEventListener("input", e => { o.proveedor = e.target.value; });
     card.querySelector(".ne-num").addEventListener("input", e => { o.numero = e.target.value; });
     card.querySelector(".ne-fecha").addEventListener("input", e => { o.fecha = e.target.value; });
+    card.querySelector(".ne-flete").addEventListener("input", e => { o.flete = e.target.value; });
     card.querySelectorAll(".ne-precio").forEach(inp => inp.addEventListener("input", e => { o.precios[Number(e.target.dataset.i)] = e.target.value; }));
     card.querySelector(".ne-file").addEventListener("change", e => {
       o.file = e.target.files[0] || null;
@@ -3300,6 +3318,7 @@ async function vistaNuevoProceso(id) {
     (ofs || []).filter(o => o.slot === 2 || o.slot === 3).forEach(o => {
       procesoExt[o.slot] = {
         proveedor: o.proveedor || "", numero: o.numero || "", fecha: o.fecha || "", archivo_url: o.archivo_url || null, file: null,
+        flete: Number(o.flete) > 0 ? o.flete : "",
         precios: procesoItems.map((_, i) => (o.precios || {})["i" + (i + 1)] ?? ""),
       };
     });
@@ -3442,7 +3461,7 @@ async function guardarProceso(enviar = false) {
       procesoItems.forEach((_, i) => { const v = parseFloat(o.precios[i]); if (v > 0) precios["i" + (i + 1)] = v; });
       const { error } = await sb.from("proceso_cotizacion_oferta").upsert({
         proceso_id: procesoIdEnEdicion, slot, proveedor: o.proveedor.trim(), numero: o.numero.trim() || null,
-        fecha: o.fecha || null, precios, archivo_url,
+        fecha: o.fecha || null, precios, archivo_url, flete: parseFloat(o.flete) || 0,
       }, { onConflict: "proceso_id,slot" });
       if (error) { mostrar("Quedó guardado, pero falló una cotización: " + error.message); return; }
     }
@@ -3461,7 +3480,7 @@ async function vistaProceso(id) {
   const [{ data: p, error }, { data: ofertas }, { data: sols }, { data: conv }] = await Promise.all([
     sb.from("proceso_cotizacion").select("*, unidad(nombre)").eq("id", id).single(),
     sb.from("proceso_cotizacion_oferta").select("*").eq("proceso_id", id),
-    sb.from("solicitud").select("id, correlativo, n_solicitud, estado").eq("proceso_cotizacion_id", id),
+    sb.from("solicitud").select("id, correlativo, n_solicitud, estado, n_orden_compra, fecha_oc").eq("proceso_cotizacion_id", id),
     sb.from("contrato").select("proveedor").eq("estado", "vigente").order("creado_en", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (error || !p) { vista().innerHTML = `<div class="card error">No se pudo abrir la cotización${error ? ": " + esc(error.message) : ""}</div>`; return; }
@@ -3494,6 +3513,9 @@ async function vistaProceso(id) {
         ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td>
           <td class="num"><input class="of-precio" data-item="${it.id}" type="number" min="0" step="1" value="${o && (o.precios || {})[it.id] ? o.precios[it.id] : ""}" ${puede ? "" : "disabled"} style="width:7rem;text-align:right"></td></tr>`).join("")}
       </table>
+      ${s.slot === 1
+        ? `<p class="hint">El flete va incluido en los precios del proveedor del contrato.</p>`
+        : `<div class="linea-detalle" style="grid-template-columns:1fr 2fr"><div><label>Flete neto (si lo cobra aparte)</label><input class="of-flete" type="number" min="0" step="1" value="${o && Number(o.flete) > 0 ? o.flete : ""}" ${puede ? "" : "disabled"} style="text-align:right"></div></div>`}
       <label>PDF de la cotización ${o && o.archivo_url ? `· ${enlaceArchivo(o.archivo_url, `ver adjunto actual`)}` : `<span class="hint">(recomendado: queda como respaldo)</span>`}</label>
       ${puede ? `<input class="of-file" type="file" accept=".pdf,.doc,.docx,image/*">
         <label>…o carga los precios desde el formulario que completó el proveedor</label>
@@ -3518,6 +3540,7 @@ async function vistaProceso(id) {
         <div><div class="d-k">Ubicación de uso</div>${esc(p.ubicacion) || "—"}</div>
         <div><div class="d-k">Motivo</div>${esc(p.motivo) || "—"}</div>
       </div>
+      ${p.estado === "emitida" && p.motivo_devolucion ? `<p class="error" style="margin-top:.8rem">Devuelta por el Director: ${esc(p.motivo_devolucion)}</p>` : ""}
       <table style="margin-top:1rem">
         <tr><th>Producto</th><th class="num">Cantidad</th><th>Unidad</th></tr>
         ${items.map(it => `<tr><td>${esc(it.producto)}</td><td class="num">${esc(it.cantidad)}</td><td>${esc(it.unidad)}</td></tr>`).join("")}
@@ -3567,14 +3590,34 @@ async function vistaProceso(id) {
 
       <div class="card">
         ${p.estado === "solicitud_creada" ? `
-          <h4 style="margin-top:0">Solicitud especial creada</h4>
+          <h4 style="margin-top:0">Compra aprobada · orden de compra</h4>
           ${(sols || []).length ? `<p>Solicitud <strong>${esc(numSol(sols[0]))}</strong> · <span class="pill ${sols[0].estado}">${sols[0].estado}</span>
-            <button class="secundario" onclick="abrirExpediente('${sols[0].id}')">Ver expediente</button></p>` : `<p class="hint">Ya se creó la solicitud.</p>`}` : `
-          <h4 style="margin-top:0">Crear la solicitud especial</h4>
+              ${sols[0].n_orden_compra ? ` · Orden de compra <strong>${esc(sols[0].n_orden_compra)}</strong>` : ""}</p>
+            <div class="acciones acciones-decision">
+              ${sols[0].n_orden_compra ? `<button class="primario" onclick="descargarOrdenDesdeProceso()">Descargar orden de compra (PDF)</button>` : ""}
+              <button class="secundario" onclick="abrirExpediente('${sols[0].id}')">Ver expediente</button>
+            </div>` : `<p class="hint">Ya se creó la solicitud.</p>`}
+          ${p.nota_decision ? `<p class="hint">Nota del Director: ${esc(p.nota_decision)}</p>` : ""}`
+        : p.estado === "rechazada" ? `
+          <h4 style="margin-top:0">Cotización rechazada por el Director</h4>
+          <p>${esc(p.nota_decision) || "—"}</p>`
+        : p.estado === "evaluacion" ? `
+          <h4 style="margin-top:0">En evaluación del Director</h4>
+          ${esDirector() ? `
+            <p class="hint">Revisa la comparación y decide. Al <strong>aprobar</strong> se genera la orden de compra para ${esc(proveedorContrato)} a nombre de la unidad que pidió la cotización, y su solicitud queda aprobada.</p>
+            <div class="acciones acciones-decision">
+              <button class="primario" onclick="decidirCotizacion('${p.id}','aprobar')">Aprobar compra a Hevia</button>
+              <button class="secundario" onclick="decidirCotizacion('${p.id}','devolver')">Devolver al ITO</button>
+              <button class="secundario" onclick="decidirCotizacion('${p.id}','rechazar')">Rechazar</button>
+            </div>` : `<p class="hint">Enviada al Director para su evaluación.</p>`}`
+        : `
+          <h4 style="margin-top:0">Enviar al Director</h4>
           ${completas === 3
-            ? `<p class="hint">Ya están las 3 cotizaciones. Se crea una solicitud de Obras con estos productos y los precios del proveedor del contrato; sigue el recorrido normal y se descuenta del convenio al facturar.</p>
-               <button class="primario" onclick="crearSolicitudDesdeProceso('${p.id}')">Crear solicitud especial</button>`
-            : `<p class="hint">Faltan ${3 - completas} cotización(es) completa(s) para poder crear la solicitud. Cada una necesita proveedor y el precio de todos los productos.</p>`}
+            ? (esITO
+              ? `<p class="hint">Ya están las 3 cotizaciones. Al enviarla, el Director revisa la comparación y decide si se compra a ${esc(proveedorContrato)}.</p>
+                 <button class="primario" onclick="enviarProcesoAlDirector('${p.id}')">Enviar al Director</button>`
+              : `<p class="hint">Ya están las 3 cotizaciones. El ITO la enviará al Director para su evaluación.</p>`)
+            : `<p class="hint">Faltan ${3 - completas} cotización(es) completa(s) para enviarla al Director. Cada una necesita proveedor y el precio de todos los productos.</p>`}
           <p class="error oculto" id="pc-error"></p>`}
       </div>` : ""}`;
 }
@@ -3598,6 +3641,100 @@ function descargarMemoriaDesdeProceso() {
 function descargarMemoriaDesdeExpediente() {
   const m = window._memoriaExp;
   if (m) descargarMemoriaCotizacion(m.p, m.ofertas, m.sol);
+}
+
+function descargarOrdenDesdeProceso() {
+  const { p, ofertas, sol } = window._procActual || {};
+  if (p) descargarOrdenCompra(p, ofertas, sol);
+}
+function descargarOrdenDesdeExpediente() {
+  const m = window._memoriaExp;
+  if (m) descargarOrdenCompra(m.p, m.ofertas, m.sol);
+}
+
+// Orden de compra a Hevia: se genera al aprobar el Director. Lleva la unidad que pidió la
+// cotización, los productos con los precios de la cotización de Hevia (flete incluido) y las
+// firmas del ITO y del Director.
+async function descargarOrdenCompra(p, ofertas, sol) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert("No se pudo cargar el generador de PDF. Revisa la conexión."); return; }
+  const hev = (ofertas || []).find(o => o.slot === 1);
+  if (!hev || !sol || !sol.n_orden_compra) { alert("La orden de compra se genera cuando el Director aprueba la compra."); return; }
+  const items = p.items || [];
+  const precio = (it) => Number((hev.precios || {})[it.id]) || 0;
+  const neto = items.reduce((t, it) => t + precio(it) * Number(it.cantidad || 0), 0);
+  const iva = Math.round(neto * 0.19);
+
+  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4", compress: true });
+  const M = 18, R = 210 - M;
+  let y = M;
+  const hacerEspacio = (alto) => { if (y + alto > 268) { doc.addPage(); y = M; } };
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+  doc.text("MUNICIPALIDAD DE DOÑIHUE", M, y);
+  doc.setFontSize(10); doc.setFont("helvetica", "normal");
+  y += 6; doc.text("Dirección de Obras — Unidad de Operaciones", M, y);
+  y += 10; doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+  doc.text(`ORDEN DE COMPRA  N° ${sol.n_orden_compra}`, M, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+  y += 9;
+  const fila = (k, v) => { doc.setFont("helvetica", "bold"); doc.text(k, M, y); doc.setFont("helvetica", "normal"); const l = doc.splitTextToSize(String(v || "—"), 118); doc.text(l, M + 52, y); y += 6 + (l.length - 1) * 4.5; };
+  fila("Fecha de emisión:", sol.fecha_oc ? fechaCL(sol.fecha_oc) : "");
+  fila("Proveedor:", hev.proveedor);
+  fila("Cotización del proveedor:", `${hev.numero ? "N° " + hev.numero : "sin número"}${hev.fecha ? " del " + fechaCL(hev.fecha) : ""}`);
+  fila("Unidad solicitante:", `${p.unidad?.nombre || ""}${p.unidad_interna ? " — " + p.unidad_interna : ""}`);
+  fila("Responsable:", p.solicitante);
+  fila("Solicitud:", numSol(sol));
+  fila("Cotización de origen:", p.correlativo);
+  fila("Lugar de entrega:", p.lugar_entrega || LUGAR_ENTREGA);
+  if (p.ubicacion) fila("Ubicación de uso:", p.ubicacion);
+
+  y += 3;
+  doc.setFont("helvetica", "bold");
+  doc.text("PRODUCTOS", M, y); y += 3; doc.setDrawColor(180); doc.line(M, y, R, y); y += 6;
+  doc.setFontSize(9);
+  doc.text("N°", M, y); doc.text("Producto", M + 9, y); doc.text("Cantidad", M + 100, y, { align: "right" }); doc.text("Unidad", M + 104, y);
+  doc.text("Valor unit. neto", R - 26, y, { align: "right" }); doc.text("Subtotal neto", R, y, { align: "right" });
+  doc.setFont("helvetica", "normal"); y += 2; doc.line(M, y, R, y); y += 6;
+  items.forEach((it, i) => {
+    const l = doc.splitTextToSize(String(it.producto || ""), 78);
+    const alto = Math.max(7, l.length * 4.4 + 2.4);
+    hacerEspacio(alto);
+    doc.text(String(i + 1), M, y); doc.text(l, M + 9, y);
+    doc.text(String(it.cantidad ?? ""), M + 100, y, { align: "right" }); doc.text(String(it.unidad || ""), M + 104, y);
+    doc.text(money(precio(it)), R - 26, y, { align: "right" }); doc.text(money(precio(it) * Number(it.cantidad || 0)), R, y, { align: "right" });
+    y += alto;
+  });
+  hacerEspacio(26);
+  doc.line(M, y - 2, R, y - 2); y += 3;
+  const total = (txt, v, negrita) => { doc.setFont("helvetica", negrita ? "bold" : "normal"); doc.text(txt, R - 26, y, { align: "right" }); doc.text(money(v), R, y, { align: "right" }); y += 5.8; };
+  total("Total neto", neto, false);
+  total("IVA 19%", iva, false);
+  total("TOTAL", neto + iva, true);
+  doc.setFont("helvetica", "normal"); y += 4;
+  const parrafo = (txt) => { const l = doc.splitTextToSize(txt, R - M); hacerEspacio(l.length * 4.6 + 3); doc.text(l, M, y); y += l.length * 4.6 + 2; };
+  doc.setFontSize(9);
+  parrafo("Los precios corresponden a la cotización del proveedor del contrato y el flete está incluido en ellos.");
+  parrafo(`Compra de productos fuera del catálogo del contrato, aprobada por el Director de Obras${p.decidido_en ? " el " + fechaCL(p.decidido_en) : ""} tras comparar 3 cotizaciones (solicitud de cotización ${p.correlativo || ""}).`);
+
+  // Firmas (PNG del bucket privado "firmas"); si falta alguna, queda su línea en blanco.
+  const [firmaITO, firmaDir] = await Promise.all([cargarFirma("ito.png"), cargarFirma("director.png")]);
+  const altoFirma = 32, anchoBloque = 70;
+  hacerEspacio(altoFirma + 24);
+  y += 6;
+  const yLinea = y + altoFirma + 8;
+  const bloque = (firma, x, texto) => {
+    if (firma) { const k = Math.min((anchoBloque - 4) / firma.w, altoFirma / firma.h); const w = firma.w * k, h = firma.h * k; doc.addImage(firma.dataUrl, firma.formato, x + (anchoBloque - w) / 2, yLinea - h - 1, w, h); }
+    doc.setDrawColor(120); doc.line(x, yLinea, x + anchoBloque, yLinea);
+    doc.setFontSize(10); doc.text(texto, x + anchoBloque / 2, yLinea + 5, { align: "center" });
+  };
+  bloque(firmaITO, M, "Encargado de Operaciones (ITO)");
+  bloque(firmaDir, R - anchoBloque, "Director de Obras Municipales");
+
+  const paginas = doc.getNumberOfPages();
+  for (let n = 1; n <= paginas; n++) {
+    doc.setPage(n); doc.setFontSize(8); doc.setTextColor(120);
+    doc.text(`Documento generado por Control Ferretería — Municipalidad de Doñihue · Página ${n} de ${paginas}`, M, 288);
+  }
+  doc.save(`orden-de-compra-${sol.n_orden_compra}.pdf`);
 }
 
 // Memoria de cotización: respaldo de las 3 cotizaciones (proveedores, cuadro comparativo
@@ -3679,7 +3816,12 @@ async function descargarMemoriaCotizacion(p, ofertas, sol) {
   hacerEspacio(24);
   doc.line(M, y - 2, R, y - 2); y += 3;
   const total = (txt, f, negrita) => { doc.setFont("helvetica", negrita ? "bold" : "normal"); doc.text(txt, M + 60, y); cols.forEach((c, i) => doc.text(money(f(c.t)), xp[i], y, { align: "right" })); y += 5.5; };
-  total("Total neto", t => t.neto, false);
+  if (cols.some(c => c.t.flete > 0)) {
+    doc.setFont("helvetica", "normal"); doc.text("Flete (neto, aparte)", M + 60, y);
+    cols.forEach((c, i) => doc.text(c.t.flete > 0 ? money(c.t.flete) : (c.slot === 1 ? "incluido" : "—"), xp[i], y, { align: "right" }));
+    y += 5.5;
+  }
+  total("Total neto" + (cols.some(c => c.t.flete > 0) ? " (con flete)" : ""), t => t.neto, false);
   total("IVA 19%", t => t.iva, false);
   total("Total con IVA", t => t.bruto, true);
   doc.setFont("helvetica", "normal");
@@ -3698,22 +3840,27 @@ async function descargarMemoriaCotizacion(p, ofertas, sol) {
   parrafo(`La cotización del proveedor del contrato (${hevia.o.proveedor}) es ${rel} la mejor cotización externa (${mejorExt.o.proveedor}).`);
   y += 2;
   titulo("DECISIÓN", 100);   // la decisión y la firma van juntas en la misma página
-  parrafo(`Proveedor seleccionado: ${hevia.o.proveedor} (proveedor del contrato), por un total de ${money(hevia.t.bruto)} con IVA (${money(hevia.t.neto)} neto).`);
+  const aprobada = p.estado === "solicitud_creada";
+  parrafo(`${aprobada ? "Proveedor seleccionado" : "Proveedor propuesto"}: ${hevia.o.proveedor} (proveedor del contrato), por un total de ${money(hevia.t.bruto)} con IVA (${money(hevia.t.neto)} neto; flete incluido).`);
+  parrafo(aprobada
+    ? `Compra aprobada por el Director de Obras${p.decidido_en ? " el " + fechaCL(p.decidido_en) : ""}${sol && sol.n_orden_compra ? `. Orden de compra N° ${sol.n_orden_compra}` : ""}.${p.nota_decision ? " Nota: " + p.nota_decision : ""}`
+    : "Pendiente de la evaluación y aprobación del Director de Obras.");
   parrafo("Las 2 cotizaciones externas se mantienen como respaldo del valor de referencia de estos productos, que no figuran en el catálogo del contrato. Los PDF de las 3 cotizaciones quedan adjuntos en el expediente.");
 
   // --- Firma del ITO (PNG del bucket privado "firmas"); si falta, queda la línea en blanco.
-  const firma = await cargarFirma("ito.png");
+  const firmaITO = await cargarFirma("ito.png");
+  const firmaDir = aprobada ? await cargarFirma("director.png") : null;
   const altoFirma = 32, anchoBloque = 70;
   hacerEspacio(altoFirma + 24);
   y += 4;
   const yLinea = y + altoFirma + 8;
-  if (firma) {
-    const k = Math.min((anchoBloque - 4) / firma.w, altoFirma / firma.h);
-    const w = firma.w * k, h = firma.h * k;
-    doc.addImage(firma.dataUrl, firma.formato, M + (anchoBloque - w) / 2, yLinea - h - 1, w, h);
-  }
-  doc.setDrawColor(120); doc.line(M, yLinea, M + anchoBloque, yLinea);
-  doc.text("Encargado de Operaciones (ITO)", M + anchoBloque / 2, yLinea + 5, { align: "center" });
+  const bloque = (firma, x, texto) => {
+    if (firma) { const k = Math.min((anchoBloque - 4) / firma.w, altoFirma / firma.h); const w = firma.w * k, h = firma.h * k; doc.addImage(firma.dataUrl, firma.formato, x + (anchoBloque - w) / 2, yLinea - h - 1, w, h); }
+    doc.setDrawColor(120); doc.line(x, yLinea, x + anchoBloque, yLinea);
+    doc.text(texto, x + anchoBloque / 2, yLinea + 5, { align: "center" });
+  };
+  bloque(firmaITO, M, "Encargado de Operaciones (ITO)");
+  if (aprobada) bloque(firmaDir, R - anchoBloque, "Director de Obras Municipales");
 
   const paginas = doc.getNumberOfPages();
   for (let n = 1; n <= paginas; n++) {
@@ -3847,6 +3994,7 @@ async function guardarOferta(procesoId, slot) {
       proceso_id: procesoId, slot, proveedor,
       numero: card.querySelector(".of-num").value.trim() || null,
       fecha: card.querySelector(".of-fecha").value || null,
+      flete: slot === 1 ? 0 : (parseFloat((card.querySelector(".of-flete") || {}).value) || 0),
       precios, archivo_url,
     }, { onConflict: "proceso_id,slot" });
     if (error) { mostrar("No se pudo guardar: " + error.message); return; }
@@ -3854,47 +4002,39 @@ async function guardarOferta(procesoId, slot) {
   } finally { _unlock(); }
 }
 
-// Con las 3 cotizaciones completas: crea la solicitud especial (recorrido de Obras)
-// con los precios del proveedor del contrato.
-async function crearSolicitudDesdeProceso(id) {
+// El ITO manda la cotización (con las 3 completas) a la evaluación del Director.
+async function enviarProcesoAlDirector(id) {
   if (!_lock()) return;
   try {
-    const errorEl = document.getElementById("pc-error");
-    const mostrar = (m) => { errorEl.textContent = m; errorEl.classList.remove("oculto"); };
-    errorEl.classList.add("oculto");
     const { p, ofertas } = window._procActual || {};
-    if (!p || p.id !== id) { mostrar("Vuelve a abrir la cotización."); return; }
-    const items = p.items || [];
+    if (!p || p.id !== id) { alert("Vuelve a abrir la cotización."); return; }
     const por = {};
     (ofertas || []).forEach(o => { por[o.slot] = o; });
-    if (!SLOTS_COTIZACION.every(s => totalOferta(items, por[s.slot]))) { mostrar("Faltan cotizaciones completas."); return; }
-    if (!await confirmar({ titulo: "Crear la solicitud especial", texto: "Se crea una solicitud con los productos y los precios del proveedor del contrato, y sigue el recorrido normal de aprobación.", boton: "Crear solicitud" })) return;
+    if (!SLOTS_COTIZACION.every(s => totalOferta(p.items || [], por[s.slot]))) { alert("Faltan cotizaciones completas."); return; }
+    if (!await confirmar({ titulo: "Enviar al Director", texto: "El Director revisa la comparación de las 3 cotizaciones y decide si se compra a Hevia. Mientras la evalúa, las cotizaciones no se pueden modificar.", boton: "Enviar al Director" })) return;
+    const { error } = await sb.from("proceso_cotizacion").update({ estado: "evaluacion" }).eq("id", id);
+    if (error) { alert("No se pudo enviar: " + error.message); return; }
+    actualizarNotificaciones();
+    vistaProceso(id);
+  } finally { _unlock(); }
+}
 
-    const porRevisar = rolEfectivo() === "solicitante_obras";
-    const payload = {
-      unidad_id: p.unidad_id, unidad_interna: p.unidad_interna, solicitante: p.solicitante,
-      motivo: p.motivo || `Compra fuera de catálogo según cotización ${p.correlativo}`,
-      ubicacion: p.ubicacion, fecha_solicitud: hoyISO(), tipo: "operaciones", proceso_cotizacion_id: p.id,
-    };
-    if (!porRevisar) {
-      payload.estado = "visada";
-      payload.visado_por = perfilActual.id;
-      payload.visado_en = new Date().toISOString();
+// Decisión del Director: aprobar la compra a Hevia (genera la orden de compra y crea la
+// solicitud ya aprobada), devolver al ITO o rechazar. La hace una función de la base.
+async function decidirCotizacion(id, decision) {
+  if (!_lock()) return;
+  try {
+    let motivo = null;
+    if (decision === "aprobar") {
+      if (!await confirmar({ titulo: "Aprobar la compra a Hevia", texto: "Se genera la orden de compra a nombre de la unidad que pidió la cotización y se crea su solicitud ya aprobada, con los precios del proveedor del contrato. Después siguen la guía de despacho y la factura.", boton: "Aprobar y generar la orden" })) return;
+    } else {
+      motivo = await confirmar(decision === "devolver"
+        ? { titulo: "Devolver al ITO", texto: "Vuelve al ITO para que corrija o complete las cotizaciones. El motivo es obligatorio.", boton: "Devolver", motivo: true }
+        : { titulo: "Rechazar la cotización", texto: "Se cierra sin comprar. El motivo es obligatorio y queda registrado.", boton: "Rechazar", motivo: true });
+      if (!motivo) return;
     }
-    const { data: sol, error } = await sb.from("solicitud").insert(payload).select().single();
-    if (error) { mostrar("No se pudo crear la solicitud: " + error.message); return; }
-
-    const hevia = por[1];
-    const detalle = items.map(it => ({
-      solicitud_id: sol.id, articulo_id: null,
-      descripcion_libre: it.producto, unidad_medida_libre: it.unidad,
-      cantidad_solicitada: it.cantidad, precio_unitario_neto: Number(hevia.precios[it.id]),
-    }));
-    const { error: errDet } = await sb.from("solicitud_detalle").insert(detalle);
-    if (errDet) { mostrar("Se creó la solicitud pero fallaron sus productos: " + errDet.message); return; }
-
-    const { error: errEst } = await sb.from("proceso_cotizacion").update({ estado: "solicitud_creada" }).eq("id", id);
-    if (errEst) { mostrar("La solicitud se creó pero no se pudo cerrar la cotización: " + errEst.message); return; }
+    const { error } = await sb.rpc("decidir_cotizacion", { p_id: id, p_decision: decision, p_motivo: motivo });
+    if (error) { alert("No se pudo registrar la decisión: " + error.message); return; }
     actualizarNotificaciones();
     vistaProceso(id);
   } finally { _unlock(); }
