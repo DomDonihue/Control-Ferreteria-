@@ -41,6 +41,13 @@ alter table proceso_cotizacion add column if not exists nota_decision text;
 alter table solicitud add column if not exists n_orden_compra text;
 alter table solicitud add column if not exists fecha_oc date;
 
+-- Los productos de una cotización no están en el catálogo: sus líneas van con
+-- texto libre y sin artículo (esto ya figuraba en el README, pero no en todas
+-- las bases estaba aplicado).
+alter table solicitud_detalle alter column articulo_id drop not null;
+alter table solicitud_detalle add column if not exists descripcion_libre text;
+alter table solicitud_detalle add column if not exists unidad_medida_libre text;
+
 -- 2) Estados -------------------------------------------------------------------
 do $$
 declare c record;
