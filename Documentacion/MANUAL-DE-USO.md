@@ -110,6 +110,11 @@ Antes de que el Director la apruebe se puede **Devolver** una solicitud de Obras
 ### Director de Obras
 - **Solicitudes:** la columna **Monto estimado** muestra el total con IVA de cada solicitud según el listado de precios (el precio de cada producto queda guardado al momento de pedir, así que no cambia si después se corrige el catálogo). Verás **Aprobar** y **Rechazar** en las pendientes de otras direcciones y en las **visadas** de Obras. Usa **Ver** para revisar el detalle antes. El rechazo exige motivo.
 - **Bitácora:** consulta quién hizo qué y cuándo.
+- **Subrogancia (cuando sales):** menú **Subrogancia** > elige a la persona > (opcional) fecha de término > **Activar**. Mientras esté activa, esa persona aprueba y decide cotizaciones como Director, y lo que apruebe sale con su firma y el cargo **«Director de Obras Municipales (S)»**. Al volver, **Desactivar**. Queda un historial de activaciones.
+
+### Director de Obras (S) — subrogante
+- El Administrador le asigna el rol **Director de Obras (S)** en **Usuarios** y carga su firma en **Convenio / ferretería** (tarjeta «Firma del Director de Obras (S)»).
+- Sin la subrogancia activa solo ve un aviso. Al activarla el Director, su menú pasa a ser el del Director en menos de 90 segundos. No puede activar ni desactivar la subrogancia por sí misma.
 
 ### DAF y Alcalde
 - DAF: consulta **Expedientes** y **Bitácora**. Alcalde: **Inicio**.

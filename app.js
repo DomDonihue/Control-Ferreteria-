@@ -173,6 +173,8 @@ function iniciarNotificaciones() {
 async function actualizarNotificaciones() {
   const btn = document.getElementById("notif-badge");
   if (!btn || !perfilActual) return;
+  // La subrogante: si el Director activó o desactivó la subrogancia, el menú se ajusta solo.
+  if (perfilActual.rol === "subrogante_director" && await resolverSubrogancia()) { armarTabs(); }
   const rol = rolEfectivo();
   const partes = [];
   try {
@@ -216,6 +218,19 @@ async function actualizarNotificaciones() {
   btn.classList.remove("oculto");
 }
 
+// ¿La subrogancia de esta persona está vigente? Devuelve true si el estado cambió.
+async function resolverSubrogancia() {
+  if (!perfilActual || perfilActual.rol !== "subrogante_director") { subroganciaVigente = false; return false; }
+  try {
+    const { data, error } = await sb.rpc("subrogancia_activa");
+    if (error) return false;
+    const vigente = data === true;
+    const cambio = vigente !== subroganciaVigente;
+    subroganciaVigente = vigente;
+    return cambio;
+  } catch { return false; }
+}
+
 // Simula el clic en la pestaña del menú (los botones se arman en armarTabs()).
 function irATab(id) {
   document.querySelector(`#tabs button[data-tab-id="${id}"]`)?.click();
@@ -243,6 +258,8 @@ async function cargarPerfilYArmarApp(user) {
   }
   perfilActual = perfil;
   rolVista = null;
+  subroganciaVigente = false;
+  await resolverSubrogancia();
   document.getElementById("pantalla-login").classList.add("oculto");
   document.getElementById("app").classList.remove("oculto");
   document.getElementById("quien-soy").textContent = `${perfil.nombre} · ${etiquetaRol(perfil.rol)}`;
@@ -351,6 +368,7 @@ const ROLES = {
   solicitante: "Solicitante",
   solicitante_obras: "Solicitante Dirección de Obras",
   lector_operativo: "Director de Obras",
+  subrogante_director: "Director de Obras (S)",
   lector_pagos: "DAF",
   lector_ejecutivo: "Alcalde",
 };
@@ -367,7 +385,15 @@ function etiquetaRol(rol) {
 // rolVista: solo para el admin, previsualiza la interfaz "como si fuera" otro rol.
 // No cambia nada en la base de datos ni los permisos RLS reales.
 let rolVista = null;
-const rolEfectivo  = () => rolVista || (perfilActual && perfilActual.rol);
+// Subrogancia: la persona con rol 'subrogante_director' actúa como Director solo
+// mientras el Director/Administrador la tenga activada (la base lo decide en
+// rol_actual(); aquí solo se refleja para armar el menú).
+let subroganciaVigente = false;
+const rolEfectivo  = () => rolVista || (perfilActual && (perfilActual.rol === "subrogante_director" && subroganciaVigente ? "lector_operativo" : perfilActual.rol));
+const esSubroganteActuando = () => !rolVista && !!perfilActual && perfilActual.rol === "subrogante_director" && subroganciaVigente;
+// Firma y cargo del Director en los PDF: subrogante => "(S)" y su propia firma.
+const cargoDirector = (sub) => sub ? "Director de Obras Municipales (S)" : "Director de Obras Municipales";
+const firmaDirector = (sub) => cargarFirma(sub ? "subrogante.png" : "director.png");
 const esAdminTotal = () => rolEfectivo() === "admin";
 const puedeOperar  = () => ["admin", "admin_ito"].includes(rolEfectivo());
 const esDirector   = () => ["admin", "lector_operativo"].includes(rolEfectivo());
@@ -413,13 +439,15 @@ const TABS = [
   { id: "expedientes", label: "Expedientes", grupo: "Gestión", icono: "expedientes", roles: ["admin", "admin_ito", "lector_operativo", "lector_pagos"], render: vistaExpedientes },
   { id: "bitacora", label: "Bitácora", grupo: "Gestión", icono: "bitacora", roles: ["admin", "lector_operativo", "lector_pagos"], render: vistaBitacora },
   { id: "catalogo", label: "Catálogo", grupo: "Inventario", icono: "catalogo", roles: ["admin", "admin_ito"], render: vistaCatalogo },
+  { id: "espera-subrogancia", label: "Inicio", grupo: null, icono: "resumen", roles: ["subrogante_director"], render: vistaSubroganteEnEspera },
+  { id: "subrogancia", label: "Subrogancia", grupo: "Administración", icono: "usuarios", roles: ["admin", "lector_operativo"], visible: () => !esSubroganteActuando(), render: vistaSubrogancia },
   { id: "convenio", label: "Convenio / ferretería", grupo: "Administración", icono: "convenio", roles: ["admin"], render: vistaConvenio },
   { id: "usuarios", label: "Usuarios", grupo: "Administración", icono: "usuarios", roles: ["admin"], render: vistaUsuarios },
-  { id: "clave", label: "Cambiar clave", grupo: "Mi cuenta", icono: "clave", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo"], render: () => vistaCambiarClave(false) },
+  { id: "clave", label: "Cambiar clave", grupo: "Mi cuenta", icono: "clave", roles: ["admin", "admin_ito", "solicitante", "solicitante_obras", "lector_operativo", "lector_pagos", "lector_ejecutivo", "subrogante_director"], render: () => vistaCambiarClave(false) },
 ];
 
 function armarTabs() {
-  const disponibles = TABS.filter(t => t.roles.includes(rolEfectivo()));
+  const disponibles = TABS.filter(t => t.roles.includes(rolEfectivo()) && (!t.visible || t.visible()));
   const nav = document.getElementById("tabs");
   nav.innerHTML = "";
 
@@ -2770,13 +2798,13 @@ async function descargarHojaPDF() {
   // Firmas (PNG del bucket privado "firmas"). La del Director solo va si la
   // solicitud ya está aprobada; si falta alguna imagen queda la línea en blanco.
   const aprobadaPdf = ["aprobada", "enviada", "recibida", "facturada", "cerrada"].includes(s.estado);
-  const [firmaIto, firmaDir] = await Promise.all([cargarFirma("ito.png"), aprobadaPdf ? cargarFirma("director.png") : null]);
+  const [firmaIto, firmaDir] = await Promise.all([cargarFirma("ito.png"), aprobadaPdf ? firmaDirector(s.aprobado_subrogante) : null]);
   const altoFirma = 32, anchoBloque = 70;
   if (y > 225) { doc.addPage(); y = M; }
   const yLinea = y + altoFirma + 12;
   const bloques = [
     { x0: M, firma: firmaIto, texto: "Encargado de Operaciones (ITO)" },
-    { x0: 210 - M - anchoBloque, firma: firmaDir, texto: "Director de Obras Municipales" },
+    { x0: 210 - M - anchoBloque, firma: firmaDir, texto: cargoDirector(s.aprobado_subrogante) },
   ];
   bloques.forEach(({ x0, firma, texto }) => {
     if (firma) {
@@ -2939,11 +2967,70 @@ async function vistaConvenio() {
 }
 
 // ---------------------------------------------------------------------
+// Subrogancia del Director: el Director (o el Administrador) la activa cuando
+// sale y la desactiva cuando vuelve. La persona subrogante ve esta pantalla
+// de espera mientras no esté activa.
+// ---------------------------------------------------------------------
+function vistaSubroganteEnEspera() {
+  vista().innerHTML = `<div class="card">
+    <h3>Subrogancia no activa</h3>
+    <p>Quedaste registrado/a como Director de Obras (S), pero el Director todavía no activa la subrogancia.
+    Cuando lo haga, el menú del Director aparecerá aquí automáticamente (se revisa cada minuto y medio).</p>
+  </div>`;
+}
+
+async function vistaSubrogancia() {
+  vista().innerHTML = "<div class='card'>Cargando…</div>";
+  const { data: e, error } = await sb.rpc("subrogancia_estado");
+  if (error || !e) { vista().innerHTML = `<div class="card error">No se pudo leer la subrogancia: ${esc(error ? error.message : "sin datos")}</div>`; return; }
+  const hoy = new Date().toISOString().slice(0, 10);
+  const hist = (e.historial || []).map(h => `<tr><td>${esc(fechaCL(h.hecho_en))}</td><td>${h.accion === "activar" ? "Activó" : "Desactivó"}</td><td>${esc(h.subrogante || "")}</td><td>${h.hasta ? "hasta " + esc(fechaCL(h.hasta)) : ""}</td><td>${esc(h.por || "")}</td></tr>`).join("");
+  const opciones = (e.candidatos || []).map(c => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join("");
+  vista().innerHTML = `
+    <div class="card" style="max-width:640px">
+      <h3 style="margin-top:0">Subrogancia del Director de Obras</h3>
+      ${e.vigente
+        ? `<p><strong>Activa:</strong> ${esc(e.subrogante_nombre || "")} subroga al Director${e.hasta ? " hasta el " + esc(fechaCL(e.hasta)) : " (sin fecha de término)"}. Lo que apruebe sale firmado como «Director de Obras Municipales (S)».</p>
+           <button class="secundario" onclick="cambiarSubrogancia(false)">Desactivar subrogancia (vuelvo yo)</button>`
+        : (opciones
+          ? `<p class="hint">Sin subrogancia activa. Elige quién te subroga mientras estás ausente.</p>
+             <label>Subrogante</label><select id="sub-quien">${opciones}</select>
+             <label>Hasta (opcional)</label><input id="sub-hasta" type="date" min="${hoy}">
+             <button class="primario" onclick="cambiarSubrogancia(true)">Activar subrogancia</button>`
+          : `<p class="hint">Aún no hay nadie con el rol «Director de Obras (S)». El Administrador debe asignarlo en Usuarios.</p>`)}
+      <p class="error oculto" id="sub-error"></p>
+    </div>
+    ${hist ? `<div class="card" style="max-width:640px"><h4 style="margin-top:0">Historial reciente</h4>
+      <table><thead><tr><th>Fecha</th><th>Acción</th><th>Subrogante</th><th></th><th>Por</th></tr></thead><tbody>${hist}</tbody></table></div>` : ""}`;
+}
+
+async function cambiarSubrogancia(activar) {
+  if (!_lock()) return;
+  try {
+    const err = document.getElementById("sub-error");
+    err.classList.add("oculto");
+    let r;
+    if (activar) {
+      const quien = document.getElementById("sub-quien").value;
+      const hasta = document.getElementById("sub-hasta").value || null;
+      if (!await confirmar({ titulo: "Activar subrogancia", texto: "La persona elegida podrá aprobar solicitudes y decidir cotizaciones como Director, y sus documentos saldrán con «(S)».", boton: "Activar" })) return;
+      r = await sb.rpc("activar_subrogancia", { p_subrogante: quien, p_hasta: hasta });
+    } else {
+      if (!await confirmar({ titulo: "Desactivar subrogancia", texto: "La persona subrogante dejará de poder aprobar en cuanto su sesión se actualice (máx. 90 s).", boton: "Desactivar" })) return;
+      r = await sb.rpc("desactivar_subrogancia");
+    }
+    if (r.error) { err.textContent = r.error.message; err.classList.remove("oculto"); return; }
+    vistaSubrogancia();
+  } finally { _unlock(); }
+}
+
+// ---------------------------------------------------------------------
 // Firmas que se estampan en la hoja de solicitud (PNG en el bucket privado
 // "firmas"; solo el Administrador las carga, desde "Convenio / ferretería").
 // ---------------------------------------------------------------------
 const FIRMAS = [
   { archivo: "director.png", titulo: "Firma y timbre del Director", subtitulo: "Aparecerá en la parte inferior de cada solicitud impresa, una vez aprobada" },
+  { archivo: "subrogante.png", titulo: "Firma del Director de Obras (S) — subrogante", subtitulo: "Se usa en lo que apruebe mientras subroga al Director; el cargo sale como «Director de Obras Municipales (S)»" },
   { archivo: "ito.png", titulo: "Firma del Encargado de Operaciones (ITO)", subtitulo: "Aparecerá en la parte inferior de cada solicitud impresa" },
 ];
 
@@ -3480,7 +3567,7 @@ async function vistaProceso(id) {
   const [{ data: p, error }, { data: ofertas }, { data: sols }, { data: conv }] = await Promise.all([
     sb.from("proceso_cotizacion").select("*, unidad(nombre)").eq("id", id).single(),
     sb.from("proceso_cotizacion_oferta").select("*").eq("proceso_id", id),
-    sb.from("solicitud").select("id, correlativo, n_solicitud, estado, n_orden_compra, fecha_oc").eq("proceso_cotizacion_id", id),
+    sb.from("solicitud").select("id, correlativo, n_solicitud, estado, n_orden_compra, fecha_oc, aprobado_subrogante").eq("proceso_cotizacion_id", id),
     sb.from("contrato").select("proveedor").eq("estado", "vigente").order("creado_en", { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (error || !p) { vista().innerHTML = `<div class="card error">No se pudo abrir la cotización${error ? ": " + esc(error.message) : ""}</div>`; return; }
@@ -3716,7 +3803,7 @@ async function descargarOrdenCompra(p, ofertas, sol) {
   parrafo(`Compra de productos fuera del catálogo del contrato, aprobada por el Director de Obras${p.decidido_en ? " el " + fechaCL(p.decidido_en) : ""} tras comparar 3 cotizaciones (solicitud de cotización ${p.correlativo || ""}).`);
 
   // Firmas (PNG del bucket privado "firmas"); si falta alguna, queda su línea en blanco.
-  const [firmaITO, firmaDir] = await Promise.all([cargarFirma("ito.png"), cargarFirma("director.png")]);
+  const [firmaITO, firmaDir] = await Promise.all([cargarFirma("ito.png"), firmaDirector(sol && sol.aprobado_subrogante)]);
   const altoFirma = 32, anchoBloque = 70;
   hacerEspacio(altoFirma + 24);
   y += 6;
@@ -3727,7 +3814,7 @@ async function descargarOrdenCompra(p, ofertas, sol) {
     doc.setFontSize(10); doc.text(texto, x + anchoBloque / 2, yLinea + 5, { align: "center" });
   };
   bloque(firmaITO, M, "Encargado de Operaciones (ITO)");
-  bloque(firmaDir, R - anchoBloque, "Director de Obras Municipales");
+  bloque(firmaDir, R - anchoBloque, cargoDirector(sol && sol.aprobado_subrogante));
 
   const paginas = doc.getNumberOfPages();
   for (let n = 1; n <= paginas; n++) {
@@ -3849,7 +3936,7 @@ async function descargarMemoriaCotizacion(p, ofertas, sol) {
 
   // --- Firma del ITO (PNG del bucket privado "firmas"); si falta, queda la línea en blanco.
   const firmaITO = await cargarFirma("ito.png");
-  const firmaDir = aprobada ? await cargarFirma("director.png") : null;
+  const firmaDir = aprobada ? await firmaDirector(p.decidido_subrogante) : null;
   const altoFirma = 32, anchoBloque = 70;
   hacerEspacio(altoFirma + 24);
   y += 4;
@@ -3860,7 +3947,7 @@ async function descargarMemoriaCotizacion(p, ofertas, sol) {
     doc.text(texto, x + anchoBloque / 2, yLinea + 5, { align: "center" });
   };
   bloque(firmaITO, M, "Encargado de Operaciones (ITO)");
-  if (aprobada) bloque(firmaDir, R - anchoBloque, "Director de Obras Municipales");
+  if (aprobada) bloque(firmaDir, R - anchoBloque, cargoDirector(p.decidido_subrogante));
 
   const paginas = doc.getNumberOfPages();
   for (let n = 1; n <= paginas; n++) {
